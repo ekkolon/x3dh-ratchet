@@ -1,0 +1,38 @@
+[package]
+name = "signal-protocol-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.signal-protocol-rs]
+path = ".."
+
+[[bin]]
+name = "bundle_parsing"
+path = "fuzz_targets/bundle_parsing.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "message_parsing"
+path = "fuzz_targets/message_parsing.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "encrypt_decrypt"
+path = "fuzz_targets/encrypt_decrypt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "header_parsing"
+path = "fuzz_targets/header_parsing.rs"
+test = false
+doc = false
