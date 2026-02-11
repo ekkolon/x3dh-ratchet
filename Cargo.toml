@@ -1,8 +1,8 @@
 [package]
 name = "signal-protocol-rs"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
 authors = ["Nelson Dominguez <ekkolon@proton.me>"]
 license = "MIT OR Apache-2.0"
 description = "Production-grade X3DH and Double Ratchet implementation"
@@ -10,25 +10,26 @@ repository = "https://github.com/ekkolon/signal-protocol-rs"
 keywords = ["cryptography", "x3dh", "double-ratchet", "signal", "e2ee"]
 categories = ["cryptography", "no-std"]
 
+[lib]
+name = "signal_protocol"
+path = "src/lib.rs"
+
 [dependencies]
 # Cryptographic primitives
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
-curve25519-dalek = { version = "4.1", features = ["zeroize"] }
 ed25519-dalek = { version = "2.1", features = ["zeroize", "rand_core"] }
 chacha20poly1305 = "0.10"
 
 # Key derivation and hashing
-hkdf = "0.12"
-sha2 = "0.10"
-hmac = "0.12"
+hkdf = "0.12.4"
+sha2 = "0.10.9"
+hmac = "0.12.1"
 
 # Randomness
 rand_core = { version = "0.6", features = ["getrandom"] }
-getrandom = "0.2"
 
 # Memory safety
 zeroize = { version = "1.8", features = ["derive", "alloc"] }
-subtle = "2.5"
 
 # Serialization (optional)
 serde = { version = "1.0", features = ["derive"], optional = true }
@@ -40,18 +41,19 @@ serde_arrays = "0.2.0"
 
 [dev-dependencies]
 # Testing
-proptest = "1.4"
-quickcheck = "1.0"
-hex = "0.4"
+proptest = "1.10"
+quickcheck = "1.1"
+hex = "0.4.3"
 criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = "1.0"
 rand = { version = "0.8", features = ["getrandom"] }
+bincode = { version = "2.0", features = ["serde"] }
 
 [features]
 default = ["serde"]
 std = []
-serde = ["dep:serde", "bincode/serde"]
-x448 = []                              # Future: X448 support
+serde = ["dep:serde", "bincode/serde", "x25519-dalek/serde"]
+x448 = []                                                    # Future: X448 support
 
 [profile.release]
 opt-level = 3
@@ -72,6 +74,6 @@ harness = false
 name = "double_ratchet"
 harness = false
 
-[lib]
-name = "signal_protocol"
-path = "src/lib.rs"
+
+[package.metadata.cargo-machete]
+ignored = ["serde_arrays"]

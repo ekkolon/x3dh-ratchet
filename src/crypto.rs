@@ -1,4 +1,7 @@
-//! Cryptographic primitives for key derivation and encryption.
+//! Cryptographic primitives for X3DH and Double Ratchet protocols.
+//!
+//! Provides key derivation functions (KDF), AEAD encryption/decryption,
+//! and symmetric key management with automatic zeroization.
 
 use crate::error::{Error, Result};
 use crate::keys::DhOutput;
@@ -6,47 +9,35 @@ use crate::keys::DhOutput;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// HKDF info string for X3DH shared secret derivation
 const X3DH_INFO: &[u8] = b"Signal_X3DH_v1";
-
-/// HKDF info string for Double Ratchet root chain
 const ROOT_INFO: &[u8] = b"Signal_DoubleRatchet_Root";
 
-/// HKDF info string for Double Ratchet sending chain
 #[allow(unused)]
 const SEND_INFO: &[u8] = b"Signal_DoubleRatchet_Send";
 
-/// HKDF info string for Double Ratchet receiving chain
 #[allow(unused)]
 const RECV_INFO: &[u8] = b"Signal_DoubleRatchet_Recv";
 
-/// Size of derived keys (32 bytes for 256-bit security)
 pub const KEY_SIZE_32: usize = 32;
-
-/// Size of derived keys (64 bytes for 512-bit security)
 pub const KEY_SIZE_64: usize = 64;
-
-/// Size of authentication tags for AEAD
 pub const TAG_SIZE: usize = 16;
-
-/// Size of nonce for ChaCha20-Poly1305
 pub const NONCE_SIZE: usize = 12;
 
-/// Derived symmetric key with automatic zeroization
+/// 256-bit symmetric key with automatic zeroization on drop.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SymmetricKey([u8; KEY_SIZE_32]);
 
 impl SymmetricKey {
-    /// Create from raw bytes
+    /// Creates a symmetric key from raw bytes.
     #[must_use]
     pub fn from_bytes(bytes: [u8; KEY_SIZE_32]) -> Self {
         Self(bytes)
     }
 
-    /// Get key as bytes
+    /// Returns the key as a byte array reference.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; KEY_SIZE_32] {
         &self.0
@@ -59,10 +50,22 @@ impl std::fmt::Debug for SymmetricKey {
     }
 }
 
-/// X3DH key derivation
+/// X3DH key derivation function per specification Section 2.2.
 ///
-/// Derives shared secret from 3 or 4 DH outputs:
-/// SK = HKDF(DH1 || DH2 || DH3 || DH4?, `info="Signal_X3DH_v1`")
+/// Computes `SK = HKDF(F || DH1 || DH2 || DH3 || [DH4])` where:
+/// - `F = 0xFF^32` (domain separation constant for X25519/XEdDSA)
+/// - `salt = 0x00^32` (32 zero bytes)
+/// - `info = "Signal_X3DH_v1"`
+/// - Output length is 32 bytes
+///
+/// The optional fourth DH output provides additional forward secrecy when
+/// a one-time prekey is available.
+///
+/// # Panics
+///
+/// Never panics in practice. The internal `expect()` is only a safeguard
+/// for the HKDF expand operation with a fixed 32-byte output length,
+/// which is always valid.
 #[must_use]
 pub fn derive_x3dh_secret(
     dh1: &DhOutput,
@@ -70,63 +73,95 @@ pub fn derive_x3dh_secret(
     dh3: &DhOutput,
     dh4: Option<&DhOutput>,
 ) -> SymmetricKey {
-    let hkdf = Hkdf::<Sha256>::new(None, &[]);
+    const F: [u8; 32] = [0xFF; 32];
 
-    let mut input = Vec::with_capacity(128);
-    input.extend_from_slice(dh1.as_bytes());
-    input.extend_from_slice(dh2.as_bytes());
-    input.extend_from_slice(dh3.as_bytes());
+    let mut ikm = [0u8; 32 + 32 * 4]; // F + 4 DH outputs
+    let mut len = 0;
+
+    ikm[len..len + 32].copy_from_slice(&F);
+    len += 32;
+
+    ikm[len..len + 32].copy_from_slice(dh1.as_bytes());
+    len += 32;
+
+    ikm[len..len + 32].copy_from_slice(dh2.as_bytes());
+    len += 32;
+
+    ikm[len..len + 32].copy_from_slice(dh3.as_bytes());
+    len += 32;
+
     if let Some(dh4) = dh4 {
-        input.extend_from_slice(dh4.as_bytes());
+        ikm[len..len + 32].copy_from_slice(dh4.as_bytes());
+        len += 32;
     }
 
-    let mut output = [0u8; KEY_SIZE_32];
-    hkdf.expand(X3DH_INFO, &mut output)
-        .expect("output size is valid");
+    let salt = [0u8; 32];
+    let hkdf = Hkdf::<Sha256>::new(Some(&salt), &ikm[..len]);
 
-    input.zeroize();
+    let mut output = [0u8; KEY_SIZE_32];
+    // SAFETY: 32-byte output is always valid for HKDF-SHA256
+    hkdf.expand(X3DH_INFO, &mut output)
+        .expect("32-byte HKDF output is always valid");
+
+    ikm.zeroize();
     SymmetricKey(output)
 }
 
-/// KDF Chain state for Double Ratchet
+/// KDF chain state for symmetric ratcheting in Double Ratchet protocol.
+///
+/// Maintains a chain key that is advanced with each step, deriving new keys
+/// while updating internal state for forward secrecy.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct KdfChain {
     key: SymmetricKey,
 }
 
 impl KdfChain {
-    /// Initialize from a key
+    /// Creates a new KDF chain from a symmetric key.
     #[must_use]
     pub fn new(key: SymmetricKey) -> Self {
         Self { key }
     }
 
-    /// Initialize root chain from X3DH output
+    /// Initializes a root chain from X3DH output.
     #[must_use]
     pub fn from_x3dh(x3dh_output: SymmetricKey) -> Self {
         Self::new(x3dh_output)
     }
 
-    /// Perform KDF step: (`chain_key`, `message_key`) = `KDF(chain_key)`
+    /// Advances the KDF chain by one step.
     ///
-    /// Uses HKDF with proper domain separation
-    pub fn step(&mut self, info: &[u8]) -> SymmetricKey {
+    /// Computes `(CK', K) = KDF(CK)` where `CK'` becomes the new chain key
+    /// and `K` is returned as the derived output.
+    ///
+    /// # Arguments
+    /// * `info` - Domain separation string for HKDF
+    ///
+    /// # Panics
+    ///
+    /// Never panics in practice. The internal `expect()` is only a safeguard
+    /// for the HKDF expand operation with a fixed 64-byte output length,
+    /// which is always valid.
+    pub fn step(&mut self, info: &[u8]) -> Result<SymmetricKey> {
         let hkdf = Hkdf::<Sha256>::new(None, self.key.as_bytes());
 
         let mut output = [0u8; KEY_SIZE_64];
+        // SAFETY: 64-byte output is always valid for HKDF-SHA256
         hkdf.expand(info, &mut output)
-            .expect("output size is valid");
+            .expect("64-byte HKDF output is always valid");
 
-        // First 32 bytes = new chain key
-        // Second 32 bytes = derived output (message key or next root)
         self.key.0.copy_from_slice(&output[..KEY_SIZE_32]);
-        let derived = SymmetricKey::from_bytes(output[KEY_SIZE_32..].try_into().unwrap());
+        let derived = SymmetricKey::from_bytes(
+            output[KEY_SIZE_32..]
+                .try_into()
+                .map_err(|_| crate::Error::CryptoError)?,
+        );
 
         output.zeroize();
-        derived
+        Ok(derived)
     }
 
-    /// Get current key (for root KDF)
+    /// Returns the current chain key without advancing the chain.
     #[must_use]
     pub fn current_key(&self) -> &SymmetricKey {
         &self.key
@@ -139,120 +174,186 @@ impl std::fmt::Debug for KdfChain {
     }
 }
 
-/// Derives new chain keys from root key and DH output
+/// Root KDF for Double Ratchet DH ratchet step.
 ///
-/// (`root_key`, `chain_key`) = `HKDF(root_key`, `DH_output`, info="Root")
-#[must_use]
-pub fn kdf_root(root_key: &SymmetricKey, dh_output: &DhOutput) -> (SymmetricKey, SymmetricKey) {
+/// Computes `(RK', CK) = KDF_RK(RK, DH_out)` where:
+/// - `RK` is the current root key
+/// - `DH_out` is a Diffie-Hellman shared secret
+/// - `RK'` is the new root key (first 32 bytes of output)
+/// - `CK` is the new chain key (second 32 bytes of output)
+///
+/// Used when performing a DH ratchet step to derive new symmetric ratchet chains.
+///
+/// # Panics
+///
+/// Never panics in practice. The internal `expect()` is only a safeguard
+/// for the HKDF expand operation with a fixed 64-byte output length,
+/// which is always valid.
+pub fn kdf_root(
+    root_key: &SymmetricKey,
+    dh_output: &DhOutput,
+) -> Result<(SymmetricKey, SymmetricKey)> {
     let hkdf = Hkdf::<Sha256>::new(Some(root_key.as_bytes()), dh_output.as_bytes());
 
     let mut output = [0u8; KEY_SIZE_64];
+    // SAFETY: 64-byte output is always valid for HKDF-SHA256
     hkdf.expand(ROOT_INFO, &mut output)
-        .expect("output size is valid");
+        .expect("64-byte HKDF output is always valid");
 
-    let new_root = SymmetricKey::from_bytes(output[..KEY_SIZE_32].try_into().unwrap());
-    let new_chain = SymmetricKey::from_bytes(output[KEY_SIZE_32..].try_into().unwrap());
+    let new_root = SymmetricKey::from_bytes(
+        output[..KEY_SIZE_32]
+            .try_into()
+            .map_err(|_| crate::Error::CryptoError)?,
+    );
+
+    let new_chain = SymmetricKey::from_bytes(
+        output[KEY_SIZE_32..]
+            .try_into()
+            .map_err(|_| crate::Error::CryptoError)?,
+    );
 
     output.zeroize();
-    (new_root, new_chain)
+    Ok((new_root, new_chain))
 }
 
-/// Derives message key from chain key
+/// Chain KDF for Double Ratchet symmetric ratchet step.
 ///
-/// `message_key` = `HMAC(chain_key`, 0x01)
-/// `new_chain_key` = `HMAC(chain_key`, 0x02)
+/// Computes `(CK', MK) = KDF_CK(CK)` where:
+/// - `MK = HMAC(CK, 0x01)` is the message key
+/// - `CK' = HMAC(CK, 0x02)` is the new chain key
+///
+/// Returns `(new_chain_key, message_key)` tuple.
+///
+/// # Panics
+///
+/// Never panics in practice. HMAC-SHA256 accepts keys of any size,
+/// so the internal `expect()` calls are only defensive safeguards.
 #[must_use]
 pub fn kdf_chain(chain_key: &SymmetricKey) -> (SymmetricKey, SymmetricKey) {
     type HmacSha256 = Hmac<Sha256>;
 
-    // Message key constant
+    // Derive message key: MK = HMAC(CK, 0x01)
     let mut mac =
-        HmacSha256::new_from_slice(chain_key.as_bytes()).expect("HMAC accepts any key size");
+        HmacSha256::new_from_slice(chain_key.as_bytes()).expect("HMAC-SHA256 accepts any key size");
     mac.update(&[0x01]);
     let message_key = SymmetricKey::from_bytes(mac.finalize().into_bytes().into());
 
-    // Chain key constant
+    // Derive new chain key: CK' = HMAC(CK, 0x02)
     let mut mac =
-        HmacSha256::new_from_slice(chain_key.as_bytes()).expect("HMAC accepts any key size");
+        HmacSha256::new_from_slice(chain_key.as_bytes()).expect("HMAC-SHA256 accepts any key size");
     mac.update(&[0x02]);
     let new_chain_key = SymmetricKey::from_bytes(mac.finalize().into_bytes().into());
 
     (new_chain_key, message_key)
 }
 
-/// Encrypt a message using ChaCha20-Poly1305 (simplified for demo)
+/// Encrypts a message using ChaCha20-Poly1305 AEAD.
 ///
-/// In production, use `chacha20poly1305` crate or similar AEAD
+/// # Security Requirements
+/// - Nonce must be unique per (key, message) pair
+/// - Nonce reuse with the same key completely breaks security
+/// - Associated data is authenticated but not encrypted
+/// - Returns ciphertext with appended 16-byte authentication tag
+///
+/// # Arguments
+/// * `key` - 256-bit encryption key
+/// * `nonce` - 96-bit nonce (must be unique per key)
+/// * `plaintext` - Data to encrypt
+/// * `associated_data` - Additional authenticated data (can be empty)
+///
+/// # Errors
+/// Returns `Error::CryptoError` if encryption fails (should not occur in practice).
 pub fn encrypt(
     key: &SymmetricKey,
     nonce: &[u8; NONCE_SIZE],
     plaintext: &[u8],
     associated_data: &[u8],
 ) -> Result<Vec<u8>> {
-    // In a real implementation, use ChaCha20-Poly1305
-    // For this demo, we'll use HMAC-based encryption (NOT production-safe!)
+    use chacha20poly1305::{
+        ChaCha20Poly1305, Key, KeyInit, Nonce,
+        aead::{Aead, Payload},
+    };
 
-    // This is a placeholder - real implementation must use proper AEAD
-    type HmacSha256 = Hmac<Sha256>;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let nonce_obj = Nonce::from_slice(nonce);
 
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC accepts any key size");
-    mac.update(nonce);
-    mac.update(associated_data);
-    mac.update(plaintext);
-    let tag = mac.finalize().into_bytes();
+    let payload = Payload {
+        msg: plaintext,
+        aad: associated_data,
+    };
 
-    let mut ciphertext = Vec::with_capacity(plaintext.len() + TAG_SIZE);
-    // XOR with key stream (simplified - real AEAD needed)
-    for (i, &byte) in plaintext.iter().enumerate() {
-        ciphertext.push(byte ^ key.as_bytes()[i % KEY_SIZE_32]);
-    }
-    ciphertext.extend_from_slice(&tag[..TAG_SIZE]);
-
-    Ok(ciphertext)
+    cipher
+        .encrypt(nonce_obj, payload)
+        .map_err(|_| Error::CryptoError)
 }
 
-/// Decrypt a message using ChaCha20-Poly1305 (simplified for demo)
+/// Decrypts a message using ChaCha20-Poly1305 AEAD.
+///
+/// Verifies the authentication tag in constant time before decryption.
+/// Returns error if authentication fails (wrong key, corrupted data, or mismatched AAD).
+///
+/// # Arguments
+/// * `key` - 256-bit decryption key (must match encryption key)
+/// * `nonce` - 96-bit nonce (must match encryption nonce)
+/// * `ciphertext` - Encrypted data with appended authentication tag
+/// * `associated_data` - Additional authenticated data (must match encryption AAD)
+///
+/// # Errors
+/// Returns `Error::DecryptionFailed` if:
+/// - Authentication tag is invalid (wrong key or corrupted ciphertext)
+/// - Associated data doesn't match what was used during encryption
+/// - Ciphertext has been tampered with
 pub fn decrypt(
     key: &SymmetricKey,
     nonce: &[u8; NONCE_SIZE],
     ciphertext: &[u8],
     associated_data: &[u8],
 ) -> Result<Vec<u8>> {
-    if ciphertext.len() < TAG_SIZE {
-        return Err(Error::DecryptionFailed);
-    }
+    use chacha20poly1305::{
+        ChaCha20Poly1305, Key, KeyInit, Nonce,
+        aead::{Aead, Payload},
+    };
 
-    let (ct, tag) = ciphertext.split_at(ciphertext.len() - TAG_SIZE);
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_bytes()));
+    let nonce_obj = Nonce::from_slice(nonce);
 
-    // Verify tag
-    type HmacSha256 = Hmac<Sha256>;
-    let mut plaintext = Vec::with_capacity(ct.len());
+    let payload = Payload {
+        msg: ciphertext,
+        aad: associated_data,
+    };
 
-    // XOR with key stream (simplified)
-    for (i, &byte) in ct.iter().enumerate() {
-        plaintext.push(byte ^ key.as_bytes()[i % KEY_SIZE_32]);
-    }
+    cipher
+        .decrypt(nonce_obj, payload)
+        .map_err(|_| Error::DecryptionFailed)
+}
 
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC accepts any key size");
-    mac.update(nonce);
-    mac.update(associated_data);
-    mac.update(&plaintext);
-    let expected_tag = mac.finalize().into_bytes();
-
-    // Constant-time comparison
-    if bool::from(expected_tag[..TAG_SIZE].ct_eq(tag)) {
-        Ok(plaintext)
-    } else {
-        plaintext.zeroize();
-        Err(Error::AuthenticationFailed)
-    }
+/// Generates a deterministic nonce from message number and chain identifier.
+///
+/// Format: `nonce = msg_num (4 bytes, LE) || chain_id[0..7] (8 bytes)`
+///
+/// # Security
+///
+/// Safe for use with ChaCha20-Poly1305 because each message uses a unique key
+/// derived from the KDF chain, preventing nonce reuse with the same key.
+/// The nonce construction ensures uniqueness across all messages in a session.
+///
+/// # Arguments
+/// * `message_number` - Monotonically increasing message counter
+/// * `chain_id` - 32-byte chain identifier (typically a public key)
+#[must_use]
+pub fn generate_nonce(message_number: u32, chain_id: &[u8; 32]) -> [u8; NONCE_SIZE] {
+    let mut nonce = [0u8; NONCE_SIZE];
+    nonce[..4].copy_from_slice(&message_number.to_le_bytes());
+    nonce[4..12].copy_from_slice(&chain_id[..8]);
+    nonce
 }
 
 #[cfg(test)]
 mod tests {
+    use chacha20poly1305::aead::OsRng;
+
     use super::*;
     use crate::keys::SecretKey;
-    use rand_core::OsRng;
 
     #[test]
     fn test_x3dh_derivation() {
@@ -274,10 +375,9 @@ mod tests {
         let key = SymmetricKey::from_bytes([42u8; KEY_SIZE_32]);
         let mut chain = KdfChain::new(key);
 
-        let derived1 = chain.step(ROOT_INFO);
-        let derived2 = chain.step(ROOT_INFO);
+        let derived1 = chain.step(ROOT_INFO).unwrap();
+        let derived2 = chain.step(ROOT_INFO).unwrap();
 
-        // outputs should be different
         assert_ne!(derived1.as_bytes(), derived2.as_bytes());
     }
 
@@ -306,5 +406,39 @@ mod tests {
         let result = decrypt(&key2, &nonce, &ciphertext, ad);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_kdf_domain_separation() {
+        let dh1 = DhOutput([1u8; 32]);
+        let dh2 = DhOutput([2u8; 32]);
+        let dh3 = DhOutput([3u8; 32]);
+
+        let sk = derive_x3dh_secret(&dh1, &dh2, &dh3, None);
+
+        let mut expected_ikm = vec![0xFF; 32];
+        expected_ikm.extend_from_slice(&[1u8; 32]);
+        expected_ikm.extend_from_slice(&[2u8; 32]);
+        expected_ikm.extend_from_slice(&[3u8; 32]);
+
+        let salt = [0u8; 32];
+        let hkdf = Hkdf::<Sha256>::new(Some(&salt), &expected_ikm);
+        let mut expected = [0u8; 32];
+        hkdf.expand(X3DH_INFO, &mut expected).unwrap();
+
+        assert_eq!(sk.as_bytes(), &expected);
+    }
+
+    #[test]
+    fn test_kdf_opk_independence() {
+        let dh1 = DhOutput([1u8; 32]);
+        let dh2 = DhOutput([2u8; 32]);
+        let dh3 = DhOutput([3u8; 32]);
+        let dh4 = DhOutput([4u8; 32]);
+
+        let sk_3dh = derive_x3dh_secret(&dh1, &dh2, &dh3, None);
+        let sk_4dh = derive_x3dh_secret(&dh1, &dh2, &dh3, Some(&dh4));
+
+        assert_ne!(sk_3dh.as_bytes(), sk_4dh.as_bytes());
     }
 }

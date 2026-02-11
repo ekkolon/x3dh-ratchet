@@ -1,4 +1,4 @@
-//! Cryptographic key types with memory safety guarantees.
+//! Cryptographic key types with automatic memory safety and zeroization.
 
 use crate::{
     crypto::KEY_SIZE_32,
@@ -9,36 +9,43 @@ use rand_core::CryptoRngCore;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// X25519 public key (32 bytes)
+/// X25519 public key for Diffie-Hellman key agreement.
+///
+/// 32-byte curve point on Curve25519. Implements `Copy` for efficient passing.
+/// Can be safely logged or transmitted as it contains no secret information.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(bincode::Decode, bincode::Encode))]
 pub struct PublicKey([u8; KEY_SIZE_32]);
 
 impl PublicKey {
-    /// Size in bytes
+    /// Size of X25519 public key in bytes.
     pub const SIZE: usize = KEY_SIZE_32;
 
-    /// Create from raw bytes
+    /// Creates a public key from raw bytes.
     #[must_use]
     pub fn from_bytes(bytes: [u8; KEY_SIZE_32]) -> Self {
         Self(bytes)
     }
 
-    /// Get raw bytes
+    /// Returns the public key as a byte array reference.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; KEY_SIZE_32] {
         &self.0
     }
 
-    /// Convert to X25519 public key
-    pub(crate) fn to_x25519(&self) -> X25519PublicKey {
+    pub(crate) fn to_x25519(self) -> X25519PublicKey {
         X25519PublicKey::from(self.0)
     }
 }
 
 impl std::fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PublicKey([REDACTED])")
+        // Show first 8 bytes as hex fingerprint for debugging
+        write!(
+            f,
+            "PublicKey({:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}...)",
+            self.0[0], self.0[1], self.0[2], self.0[3], self.0[4], self.0[5], self.0[6], self.0[7]
+        )
     }
 }
 
@@ -75,29 +82,39 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
     }
 }
 
-/// X25519 secret key with automatic zeroization
+/// X25519 secret key with automatic zeroization on drop.
+///
+/// 32-byte scalar for Curve25519 ECDH. Memory is securely erased when
+/// the key goes out of scope to prevent key material leakage.
 #[derive(Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SecretKey(StaticSecret);
 
 impl SecretKey {
-    /// Generate a new random secret key
+    /// Generates a new random secret key from a cryptographically secure RNG.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
         Self(StaticSecret::random_from_rng(rng))
     }
 
-    /// Create from raw bytes (must be 32 bytes)
+    /// Creates a secret key from raw bytes.
     #[must_use]
     pub fn from_bytes(bytes: [u8; KEY_SIZE_32]) -> Self {
         Self(StaticSecret::from(bytes))
     }
 
-    /// Get the corresponding public key
+    /// Derives the corresponding X25519 public key.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from(&self.0)
     }
 
-    /// Perform Diffie-Hellman key agreement
+    /// Performs X25519 Diffie-Hellman key agreement.
+    ///
+    /// Computes the shared secret `DH(sk, PK)` where `sk` is this secret key
+    /// and `PK` is the remote public key. The result is a 32-byte shared secret.
+    ///
+    /// The output must be passed through a KDF (e.g., HKDF) before use as a
+    /// symmetric key. Raw DH output should never be used directly as a key.
     #[must_use]
     pub fn diffie_hellman(&self, public: &PublicKey) -> DhOutput {
         let shared = self.0.diffie_hellman(&public.to_x25519());
@@ -111,13 +128,15 @@ impl std::fmt::Debug for SecretKey {
     }
 }
 
-/// Output of Diffie-Hellman operation (32 bytes)
-/// Automatically zeroized on drop
+/// Output of X25519 Diffie-Hellman key agreement.
+///
+/// 32-byte shared secret derived from ECDH. Automatically zeroized on drop.
+/// Must be passed through a KDF before use as a symmetric key.
 #[derive(Zeroize, ZeroizeOnDrop)]
-pub struct DhOutput([u8; KEY_SIZE_32]);
+pub struct DhOutput(pub(crate) [u8; KEY_SIZE_32]);
 
 impl DhOutput {
-    /// Returns a byte slice of the Diffie-Hellman operation output
+    /// Returns the raw DH output as a byte array reference.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; KEY_SIZE_32] {
         &self.0
@@ -130,33 +149,39 @@ impl std::fmt::Debug for DhOutput {
     }
 }
 
-/// Ed25519 signing key for identity signatures
+/// Ed25519 signing keypair for identity authentication.
+///
+/// Contains both signing (private) and verifying (public) keys.
+/// Used to sign prekey bundles in X3DH protocol.
 pub struct SigningKeyPair {
     signing: SigningKey,
     verifying: VerifyingKey,
 }
 
 impl SigningKeyPair {
-    /// Generate a new random signing key pair
+    /// Generates a new random Ed25519 signing keypair.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
         let signing = SigningKey::generate(rng);
         let verifying = signing.verifying_key();
         Self { signing, verifying }
     }
 
-    /// Get the verifying (public) key
+    /// Returns the verifying (public) key.
     #[must_use]
     pub fn verifying_key(&self) -> &VerifyingKey {
         &self.verifying
     }
 
-    /// Sign a message
+    /// Signs a message producing a 64-byte Ed25519 signature.
+    ///
+    /// The signature can be verified by anyone with the corresponding
+    /// verifying key, proving the signer possessed the signing key.
     #[must_use]
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.signing.sign(message)
     }
 
-    /// Get verifying key as bytes
+    /// Returns the verifying key as raw bytes.
     #[must_use]
     pub fn verifying_key_bytes(&self) -> [u8; KEY_SIZE_32] {
         self.verifying.to_bytes()
@@ -169,7 +194,17 @@ impl std::fmt::Debug for SigningKeyPair {
     }
 }
 
-/// Verify an Ed25519 signature
+/// Verifies an Ed25519 signature in constant time.
+///
+/// # Arguments
+/// * `public_key` - 32-byte Ed25519 public key
+/// * `message` - Message that was signed
+/// * `signature` - 64-byte Ed25519 signature
+///
+/// # Errors
+/// Returns error if:
+/// - Public key encoding is invalid
+/// - Signature verification fails (wrong key or corrupted signature)
 pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> Result<()> {
     let verifying_key =
         VerifyingKey::from_bytes(public_key).map_err(|_| Error::InvalidPublicKey)?;
@@ -179,17 +214,23 @@ pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8; 
         .map_err(|_| Error::InvalidSignature)
 }
 
-/// Identity key pair combining X25519 and Ed25519
+/// Combined identity keypair for X3DH protocol.
+///
+/// Contains both an X25519 key for DH key agreement and an Ed25519 key
+/// for signing prekey bundles. Represents a long-term identity.
 #[derive(Debug)]
 pub struct IdentityKeyPair {
-    /// X25519 key for key agreement
+    /// X25519 secret key for Diffie-Hellman key agreement
     pub dh_key: SecretKey,
-    /// Ed25519 key for signing
+
+    /// Ed25519 keypair for signing prekey bundles
     pub signing_key: SigningKeyPair,
 }
 
 impl IdentityKeyPair {
-    /// Generate a new identity key pair
+    /// Generates a new random identity keypair.
+    ///
+    /// Creates independent X25519 and Ed25519 keypairs from the provided RNG.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
         Self {
             dh_key: SecretKey::generate(rng),
@@ -197,13 +238,13 @@ impl IdentityKeyPair {
         }
     }
 
-    /// Get the public identity key
+    /// Returns the X25519 public key component.
     #[must_use]
     pub fn public_key(&self) -> PublicKey {
         self.dh_key.public_key()
     }
 
-    /// Get the verifying key
+    /// Returns the Ed25519 verifying key component.
     #[must_use]
     pub fn verifying_key(&self) -> &VerifyingKey {
         self.signing_key.verifying_key()
