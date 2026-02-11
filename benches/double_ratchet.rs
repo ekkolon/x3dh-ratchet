@@ -1,8 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use rand_core::OsRng;
 use signal_protocol::double_ratchet::DoubleRatchet;
 use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{initiate, PreKeyState};
+use signal_protocol::x3dh::{PreKeyState, initiate};
 
 fn setup_ratchet() -> (DoubleRatchet, DoubleRatchet) {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -20,7 +20,8 @@ fn setup_ratchet() -> (DoubleRatchet, DoubleRatchet) {
     .unwrap();
 
     let bob_dh = SecretKey::generate(&mut OsRng);
-    let alice_ratchet = DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+    let alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
     (alice_ratchet, bob_ratchet)
