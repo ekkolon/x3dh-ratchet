@@ -1,75 +1,118 @@
-//! Error types for the Signal protocol implementation.
+//! Error types for X3DH and Double Ratchet protocol operations.
 
 use thiserror::Error;
 
-/// Result type alias for Signal protocol operations
+/// Result type alias for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors that can occur during protocol operations
+/// Errors that can occur during X3DH and Double Ratchet operations.
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// Invalid signature detected
-    #[error("invalid signature")]
+    /// Ed25519 signature verification failed.
+    ///
+    /// Indicates either a corrupted signature or signature created with
+    /// a different signing key than expected.
+    #[error("signature verification failed")]
     InvalidSignature,
 
-    /// Invalid public key encoding
-    #[error("invalid public key")]
+    /// Public key has invalid encoding or format.
+    ///
+    /// X25519 or Ed25519 public key does not conform to expected encoding.
+    #[error("invalid public key encoding")]
     InvalidPublicKey,
 
-    /// Invalid secret key encoding  
-    #[error("invalid secret key")]
+    /// Secret key has invalid encoding or format.
+    #[error("invalid secret key encoding")]
     InvalidSecretKey,
 
-    /// Missing required one-time prekey
-    #[error("missing one-time prekey")]
+    /// Session state is invalid for the requested operation.
+    ///
+    /// Occurs when trying to encrypt without a sending chain or decrypt
+    /// without a receiving chain.
+    #[error("invalid session state")]
+    InvalidSessionState,
+
+    /// One-time prekey not available.
+    ///
+    /// Server has no remaining one-time prekeys for the requested user.
+    /// X3DH will fall back to 3-DH mode without the fourth DH operation.
+    #[error("no one-time prekeys available")]
     MissingOneTimePrekey,
 
-    /// One-time prekey already consumed
-    #[error("one-time prekey already used")]
+    /// One-time prekey already consumed.
+    ///
+    /// Attempted to use a one-time prekey that was already consumed by
+    /// a previous protocol run. This may indicate a replay attack.
+    #[error("one-time prekey already consumed")]
     OneTimePreKeyConsumed,
 
-    /// DH key agreement failed
+    /// Diffie-Hellman key agreement failed.
+    ///
+    /// DH operation produced invalid output or computation failed.
     #[error("key agreement failed")]
     KeyAgreementFailed,
 
-    /// Invalid message format
-    #[error("invalid message format")]
+    /// Message wire format is malformed.
+    ///
+    /// Received message has invalid structure, truncated data, or
+    /// incorrect length prefixes.
+    #[error("malformed message format")]
     InvalidMessageFormat,
 
-    /// Message authentication failed
-    #[error("authentication failed")]
+    /// AEAD authentication tag verification failed.
+    ///
+    /// Message was tampered with, encrypted with wrong key, or
+    /// associated data does not match.
+    #[error("message authentication failed")]
     AuthenticationFailed,
 
-    /// Message decryption failed
-    #[error("decryption failed")]
+    /// AEAD decryption failed.
+    ///
+    /// Could not decrypt message ciphertext. Implies authentication
+    /// failure as AEAD verifies before decrypting.
+    #[error("message decryption failed")]
     DecryptionFailed,
 
-    /// Message number out of sequence
-    #[error("out of order message")]
+    /// Received message number is less than expected.
+    ///
+    /// Message arrived out-of-order and its key was already deleted.
+    /// This prevents backwards message replay.
+    #[error("message number out of sequence")]
     OutOfOrderMessage,
 
-    /// Skipped too many messages in chain
-    #[error("too many skipped messages")]
+    /// Too many skipped messages in ratchet chain.
+    ///
+    /// Gap between received and expected message number exceeds maximum.
+    /// Protects against `DoS` via forced key storage exhaustion.
+    #[error("exceeded maximum skipped message limit")]
     TooManySkippedMessages,
 
-    /// Invalid header in ratchet message
-    #[error("invalid message header")]
+    /// Double Ratchet message header is invalid.
+    ///
+    /// Header has wrong size, malformed fields, or invalid encoding.
+    #[error("invalid Double Ratchet header")]
     InvalidHeader,
 
-    /// Serialization failed
-    #[error("serialization error")]
+    /// Failed to serialize data structure.
+    #[error("serialization failed")]
     SerializationError,
 
-    /// Deserialization failed
-    #[error("deserialization error")]
+    /// Failed to deserialize data structure.
+    #[error("deserialization failed")]
     DeserializationError,
 
-    /// Internal cryptographic error
-    #[error("cryptographic error")]
+    /// Internal cryptographic operation failed.
+    ///
+    /// Unexpected failure in a cryptographic primitive. Should not occur
+    /// under normal operation.
+    #[error("internal cryptographic error")]
     CryptoError,
 
-    /// Storage operation failed
-    #[error("storage error")]
+    /// Storage backend operation failed.
+    ///
+    /// Failure accessing prekey storage or skipped message key storage.
+    /// May indicate database errors or lock poisoning.
+    #[error("storage backend error")]
     StorageError,
 }
 

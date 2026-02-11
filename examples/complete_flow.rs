@@ -4,10 +4,10 @@
 //! a secure channel and exchange messages.
 
 use rand_core::OsRng;
+use signal_protocol::Result;
 use signal_protocol::double_ratchet::DoubleRatchet;
 use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{initiate, respond, PreKeyState};
-use signal_protocol::Result;
+use signal_protocol::x3dh::{PreKeyState, initiate, respond};
 
 fn main() -> Result<()> {
     println!("=== Signal Protocol Complete Example ===\n");
@@ -60,7 +60,8 @@ fn main() -> Result<()> {
     let bob_ratchet_dh = SecretKey::generate(&mut OsRng);
     let bob_ratchet_public = bob_ratchet_dh.public_key();
 
-    let mut alice_ratchet = DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_ratchet_public);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_ratchet_public)?;
 
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_ratchet_dh);
     println!("   ✓ Alice and Bob have initialized ratchets\n");

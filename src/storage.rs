@@ -1,35 +1,57 @@
-//! Storage abstraction for prekey management
+//! Storage abstractions for one-time prekeys and skipped message keys.
 //!
-//! Provides trait-based storage allowing in-memory or persistent backends
+//! Provides trait-based storage backends supporting both in-memory and
+//! persistent implementations. Thread-safe by design with interior mutability.
 
 use crate::error::{Error, Result};
 use crate::keys::{PublicKey, SecretKey};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// Trait for prekey storage backends
+/// Storage backend for one-time prekeys.
+///
+/// Implementations must be thread-safe (`Send + Sync`) to support concurrent
+/// access from multiple protocol sessions. Keys are consumed atomically when
+/// retrieved to prevent reuse.
 pub trait PreKeyStore: Send + Sync {
-    /// Store a one-time prekey
+    /// Stores a one-time prekey with the given ID.
+    ///
+    /// If a prekey with the same ID already exists, it is replaced.
     fn store_one_time_prekey(&mut self, id: u32, key: SecretKey) -> Result<()>;
 
-    /// Retrieve and consume a one-time prekey
+    /// Retrieves and removes a one-time prekey by ID.
+    ///
+    /// Returns `None` if no prekey exists with the given ID. This operation
+    /// must be atomic to prevent double-spending of prekeys.
     fn consume_one_time_prekey(&mut self, id: u32) -> Result<Option<SecretKey>>;
 
-    /// List available one-time prekey IDs
+    /// Lists all available one-time prekey IDs.
+    ///
+    /// Useful for inventory management and monitoring prekey depletion.
     fn list_one_time_prekeys(&self) -> Result<Vec<u32>>;
 
-    /// Get count of remaining one-time prekeys
+    /// Returns the number of one-time prekeys currently stored.
     fn one_time_prekey_count(&self) -> Result<usize>;
 }
 
-/// Thread-safe, in-memory prekey storage
+/// Thread-safe in-memory prekey storage.
+///
+/// Suitable for testing and applications that don't require persistence.
+/// Uses `Arc<Mutex<_>>` for safe concurrent access across threads.
+///
+/// # Example
+/// ```no_run
+/// # use signal_protocol::storage::InMemoryPreKeyStore;
+/// let mut store = InMemoryPreKeyStore::new();
+/// // Store prekeys generated during setup...
+/// ```
 #[derive(Clone, Debug)]
 pub struct InMemoryPreKeyStore {
     one_time_prekeys: Arc<Mutex<HashMap<u32, SecretKey>>>,
 }
 
 impl InMemoryPreKeyStore {
-    /// Create new in-memory prekey storage
+    /// Creates a new empty prekey store.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -37,7 +59,13 @@ impl InMemoryPreKeyStore {
         }
     }
 
-    /// Populate with prekeys
+    /// Bulk-inserts multiple prekeys into the store.
+    ///
+    /// Useful for initializing a store with a batch of freshly generated
+    /// prekeys. If any ID already exists, its prekey is replaced.
+    ///
+    /// # Errors
+    /// Returns error if the internal mutex is poisoned.
     pub fn populate(&mut self, keys: Vec<(u32, SecretKey)>) -> Result<()> {
         let mut store = self
             .one_time_prekeys
@@ -92,7 +120,14 @@ impl PreKeyStore for InMemoryPreKeyStore {
     }
 }
 
-/// Skipped message key storage for out-of-order messages
+/// Storage for skipped message keys in Double Ratchet.
+///
+/// Stores message keys for out-of-order messages indexed by
+/// `(dh_public, message_number)`. Enforces a maximum capacity to prevent
+/// unbounded memory growth from malicious message patterns.
+///
+/// # Security
+/// Keys are automatically zeroized when removed or when storage is dropped.
 #[derive(Clone, Debug)]
 pub struct SkippedMessageKeyStorage {
     keys: Arc<Mutex<HashMap<(PublicKey, u32), crate::crypto::SymmetricKey>>>,
@@ -100,7 +135,11 @@ pub struct SkippedMessageKeyStorage {
 }
 
 impl SkippedMessageKeyStorage {
-    /// Create new storage with maximum capacity
+    /// Creates new storage with the specified maximum capacity.
+    ///
+    /// # Arguments
+    /// * `max_keys` - Maximum number of skipped keys to store. Attempting to
+    ///   store more returns `Error::TooManySkippedMessages`.
     #[must_use]
     pub fn new(max_keys: usize) -> Self {
         Self {
@@ -109,7 +148,15 @@ impl SkippedMessageKeyStorage {
         }
     }
 
-    /// Store a skipped message key
+    /// Stores a skipped message key.
+    ///
+    /// # Arguments
+    /// * `dh_public` - DH public key from the message header
+    /// * `msg_num` - Message number from the message header
+    /// * `key` - Derived message key for decrypting this message
+    ///
+    /// # Errors
+    /// Returns `Error::TooManySkippedMessages` if capacity is exceeded.
     pub fn store(
         &mut self,
         dh_public: PublicKey,
@@ -126,7 +173,9 @@ impl SkippedMessageKeyStorage {
         Ok(())
     }
 
-    /// Retrieve and remove a skipped message key
+    /// Retrieves and removes a skipped message key.
+    ///
+    /// Returns `None` if no key exists for the given `(dh_public, msg_num)` pair.
     pub fn consume(
         &mut self,
         dh_public: &PublicKey,
@@ -136,13 +185,15 @@ impl SkippedMessageKeyStorage {
         Ok(store.remove(&(*dh_public, msg_num)))
     }
 
-    /// Get current message keys count
+    /// Returns the current number of stored skipped keys.
     pub fn count(&self) -> Result<usize> {
         let store = self.keys.lock().map_err(|_| Error::StorageError)?;
         Ok(store.len())
     }
 
-    /// Clear all stored keys
+    /// Removes all stored skipped message keys.
+    ///
+    /// Keys are zeroized before removal for security.
     pub fn clear(&mut self) -> Result<()> {
         let mut store = self.keys.lock().map_err(|_| Error::StorageError)?;
         store.clear();
@@ -158,10 +209,11 @@ impl Default for SkippedMessageKeyStorage {
 
 #[cfg(test)]
 mod tests {
+    use chacha20poly1305::aead::OsRng;
+
     use crate::crypto::KEY_SIZE_32;
 
     use super::*;
-    use rand_core::OsRng;
 
     #[test]
     fn test_in_memory_storage() {
@@ -216,7 +268,6 @@ mod tests {
             )
             .unwrap();
 
-        // Should fail when capacity exceeded
         let result = storage.store(
             dh_public,
             3,

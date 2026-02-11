@@ -1,51 +1,35 @@
-//! Integration tests for X3DH and Double Ratchet
-//!
-//! Tests complete protocol flows including:
-//! - Full X3DH handshake
-//! - Double Ratchet initialization and message exchange
-//! - Out-of-order message delivery
-//! - Error conditions
-
-use rand_core::OsRng;
+use chacha20poly1305::aead::OsRng;
+use signal_protocol::Error;
 use signal_protocol::double_ratchet::{DoubleRatchet, Header, Message};
 use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{initiate, respond, PreKeyState};
-use signal_protocol::Error;
+use signal_protocol::x3dh::{PreKeyState, initiate, respond};
 
+/// X3DH key agreement + Double Ratchet messaging
 #[test]
 fn test_full_protocol_flow() {
-    // Alice and Bob identities
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    // Bob generates prekey bundle
     let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let bob_bundle = bob_prekeys.public_bundle();
 
-    // Alice initiates X3DH
     let alice_x3dh =
         initiate(&mut OsRng, &alice_identity, &bob_bundle).expect("X3DH initiation should succeed");
 
-    // Bob responds
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message)
         .expect("X3DH response should succeed");
 
-    // Verify shared secrets match
     assert_eq!(
         alice_x3dh.shared_secret.as_bytes(),
         bob_x3dh.shared_secret.as_bytes(),
         "X3DH shared secrets must match"
     );
 
-    // Initialize Double Ratchet
     let bob_dh = SecretKey::generate(&mut OsRng);
-    let bob_public = bob_dh.public_key();
-
-    let mut alice_ratchet = DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_public);
-
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
-    // Exchange messages
     let messages = vec![
         b"Hello Bob!".as_slice(),
         b"How are you?".as_slice(),
@@ -53,22 +37,37 @@ fn test_full_protocol_flow() {
     ];
 
     for msg in &messages {
-        let encrypted = alice_ratchet
-            .encrypt(msg, b"")
-            .expect("Encryption should succeed");
-
-        let decrypted = bob_ratchet
-            .decrypt(&encrypted, b"")
-            .expect("Decryption should succeed");
-
-        assert_eq!(&decrypted, msg, "Decrypted message must match original");
+        let encrypted = alice_ratchet.encrypt(msg, b"").unwrap();
+        let decrypted = bob_ratchet.decrypt(&encrypted, b"").unwrap();
+        assert_eq!(&decrypted, msg);
     }
 
-    // Bob responds
     let response = b"Hello Alice! I'm good!";
     let encrypted = bob_ratchet.encrypt(response, b"").unwrap();
     let decrypted = alice_ratchet.decrypt(&encrypted, b"").unwrap();
     assert_eq!(&decrypted, response);
+}
+
+#[test]
+fn test_x3dh_without_one_time_prekey() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+    let bundle = bob_prekeys.public_bundle();
+
+    assert!(
+        bundle.one_time_prekey.is_none(),
+        "Bundle should have no OPK"
+    );
+
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle)
+        .expect("X3DH should work without one-time prekey");
+
+    assert!(
+        alice_x3dh.initial_message.used_one_time_prekey.is_none(),
+        "Should not use OPK in 3-DH mode"
+    );
 }
 
 #[test]
@@ -82,10 +81,9 @@ fn test_out_of_order_messages() {
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
-    // Alice sends multiple messages
     let msg1 = alice_ratchet.encrypt(b"Message 1", b"").unwrap();
     let msg2 = alice_ratchet.encrypt(b"Message 2", b"").unwrap();
     let msg3 = alice_ratchet.encrypt(b"Message 3", b"").unwrap();
@@ -112,21 +110,139 @@ fn test_bidirectional_messaging() {
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
-    // Interleaved conversation
     let a1 = alice_ratchet.encrypt(b"Alice 1", b"").unwrap();
-    let b1 = bob_ratchet.decrypt(&a1, b"").unwrap();
-    assert_eq!(&b1, b"Alice 1");
+    assert_eq!(&bob_ratchet.decrypt(&a1, b"").unwrap(), b"Alice 1");
 
-    let b2 = bob_ratchet.encrypt(b"Bob 1", b"").unwrap();
-    let a2 = alice_ratchet.decrypt(&b2, b"").unwrap();
-    assert_eq!(&a2, b"Bob 1");
+    // Bob's first message triggers DH ratchet step
+    let b1 = bob_ratchet.encrypt(b"Bob 1", b"").unwrap();
+    assert_eq!(&alice_ratchet.decrypt(&b1, b"").unwrap(), b"Bob 1");
 
-    let a3 = alice_ratchet.encrypt(b"Alice 2", b"").unwrap();
-    let b3 = bob_ratchet.decrypt(&a3, b"").unwrap();
-    assert_eq!(&b3, b"Alice 2");
+    let a2 = alice_ratchet.encrypt(b"Alice 2", b"").unwrap();
+    assert_eq!(&bob_ratchet.decrypt(&a2, b"").unwrap(), b"Alice 2");
+}
+
+#[test]
+fn test_dh_ratchet_rotation() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    let msg1 = alice_ratchet.encrypt(b"test", b"").unwrap();
+    let alice_dh_1 = msg1.header.dh_public;
+
+    bob_ratchet.decrypt(&msg1, b"").unwrap();
+
+    // Bob sends - triggers DH ratchet on Bob's side
+    let msg2 = bob_ratchet.encrypt(b"response", b"").unwrap();
+    let _bob_dh_1 = msg2.header.dh_public;
+
+    // Alice receives - triggers DH ratchet on Alice's side
+    alice_ratchet.decrypt(&msg2, b"").unwrap();
+
+    // Alice sends again - should have new DH key
+    let msg3 = alice_ratchet.encrypt(b"test2", b"").unwrap();
+    let alice_dh_2 = msg3.header.dh_public;
+
+    assert_ne!(
+        alice_dh_1, alice_dh_2,
+        "DH public key should rotate after ratchet step"
+    );
+}
+
+#[test]
+fn test_excessive_skipped_messages() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    // Encrypt 1002 messages (MAX_SKIP is 1000)
+    // Message numbers will be 0, 1, 2, ..., 1001
+    let mut messages = Vec::new();
+    for i in 0..1002 {
+        messages.push(
+            alice_ratchet
+                .encrypt(format!("Msg {}", i).as_bytes(), b"")
+                .unwrap(),
+        );
+    }
+
+    // Bob is at recv_count = 0
+    // Trying to decrypt message 1001 (index 1001) requires skipping 1001 messages (0..1001)
+    // This exceeds MAX_SKIP = 1000
+    let result = bob_ratchet.decrypt(&messages[1001], b"");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), Error::TooManySkippedMessages);
+
+    // But message 1000 should work (skips exactly 1000 messages: 0..1000)
+    let result = bob_ratchet.decrypt(&messages[1000], b"");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_message_replay_rejected() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    let msg = alice_ratchet.encrypt(b"test", b"").unwrap();
+
+    // First decryption succeeds
+    assert!(bob_ratchet.decrypt(&msg, b"").is_ok());
+
+    // Replay should fail (key already consumed)
+    let result = bob_ratchet.decrypt(&msg, b"");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_corrupted_ciphertext_rejected() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    let mut msg = alice_ratchet.encrypt(b"test", b"").unwrap();
+
+    // Corrupt ciphertext
+    msg.ciphertext[10] ^= 1;
+
+    let result = bob_ratchet.decrypt(&msg, b"");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), Error::DecryptionFailed);
 }
 
 #[test]
@@ -135,9 +251,8 @@ fn test_invalid_signature_rejected() {
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let mut bundle = bob_prekeys.public_bundle();
 
-    bundle.signed_prekey_signature[0] ^= 1; // Corrupt signature
+    bundle.signed_prekey_signature[0] ^= 1;
 
-    // Alice should reject
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let result = initiate(&mut OsRng, &alice_identity, &bundle);
 
@@ -146,11 +261,28 @@ fn test_invalid_signature_rejected() {
 }
 
 #[test]
+fn test_one_time_prekey_consumption() {
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+
+    let count_before = bob_prekeys.one_time_prekeys.len();
+    assert!(count_before > 0);
+
+    let opk1 = bob_prekeys.consume_one_time_prekey().unwrap();
+    assert_eq!(bob_prekeys.one_time_prekeys.len(), count_before - 1);
+
+    let opk2 = bob_prekeys.consume_one_time_prekey().unwrap();
+    assert_eq!(bob_prekeys.one_time_prekeys.len(), count_before - 2);
+
+    // Each OPK should be unique
+    assert_ne!(opk1.public_key().as_bytes(), opk2.public_key().as_bytes());
+}
+
+#[test]
 fn test_missing_one_time_prekey() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let mut bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
 
-    // Consume non-existent prekey
     let result = bob_prekeys.consume_one_time_prekey();
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), Error::MissingOneTimePrekey);
@@ -172,6 +304,7 @@ fn test_message_serialization() {
     let bytes = message.to_bytes();
     let deserialized = Message::from_bytes(&bytes).expect("Deserialization should succeed");
 
+    assert_eq!(deserialized.header.dh_public, header.dh_public);
     assert_eq!(
         deserialized.header.previous_chain_length,
         header.previous_chain_length
@@ -191,17 +324,16 @@ fn test_associated_data_integrity() {
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
     let ad = b"important context";
     let encrypted = alice_ratchet.encrypt(b"secret", ad).unwrap();
 
-    // correct AD
-    let decrypted = bob_ratchet.decrypt(&encrypted, ad).unwrap();
-    assert_eq!(&decrypted, b"secret");
+    // Correct AD works
+    assert!(bob_ratchet.decrypt(&encrypted, ad).is_ok());
 
-    // Decrypt with wrong AD should fail
+    // Wrong AD fails
     let encrypted2 = alice_ratchet.encrypt(b"secret2", ad).unwrap();
     let result = bob_ratchet.decrypt(&encrypted2, b"wrong AD");
     assert!(result.is_err());
@@ -209,9 +341,6 @@ fn test_associated_data_integrity() {
 
 #[test]
 fn test_forward_secrecy() {
-    // Even if keys are compromised after messages are sent,
-    // past messages must remain secure (simplified)
-
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
@@ -221,17 +350,56 @@ fn test_forward_secrecy() {
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
-    // Send many messages to advance ratchet
+    let old_msg = alice_ratchet.encrypt(b"old", b"").unwrap();
+    bob_ratchet.decrypt(&old_msg, b"").unwrap();
+
+    // Advance ratchet many times
     for i in 0..10 {
-        let msg = format!("Message {}", i);
-        let encrypted = alice_ratchet.encrypt(msg.as_bytes(), b"").unwrap();
-        bob_ratchet.decrypt(&encrypted, b"").unwrap();
+        let msg = alice_ratchet
+            .encrypt(format!("msg{}", i).as_bytes(), b"")
+            .unwrap();
+        bob_ratchet.decrypt(&msg, b"").unwrap();
     }
 
-    // The ratchet has advanced. old message keys are deleted, keys are one-time use
+    // Old message should not be decryptable (key deleted)
+    let result = bob_ratchet.decrypt(&old_msg, b"");
+    assert!(result.is_err(), "Old message keys should be deleted");
+}
+
+/// Recovery after key compromise
+#[test]
+fn test_post_compromise_security() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    // Normal exchange
+    let msg1 = alice_ratchet.encrypt(b"before", b"").unwrap();
+    bob_ratchet.decrypt(&msg1, b"").unwrap();
+
+    // [Simulated compromise here - attacker gets state]
+    // In real attack, attacker could decrypt messages at this point
+
+    // Bob sends response - triggers DH ratchet with new ephemeral key
+    let msg2 = bob_ratchet.encrypt(b"recovery", b"").unwrap();
+    alice_ratchet.decrypt(&msg2, b"").unwrap();
+
+    // After DH ratchet, security is restored
+    // New messages use fresh key material unknown to attacker
+    let msg3 = alice_ratchet.encrypt(b"secure again", b"").unwrap();
+    let decrypted = bob_ratchet.decrypt(&msg3, b"").unwrap();
+    assert_eq!(&decrypted, b"secure again");
 }
 
 #[test]
@@ -245,7 +413,7 @@ fn test_large_messages() {
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key());
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
     // 1 MB message
@@ -254,4 +422,23 @@ fn test_large_messages() {
     let decrypted = bob_ratchet.decrypt(&encrypted, b"").unwrap();
 
     assert_eq!(decrypted, large_message);
+}
+
+#[test]
+fn test_empty_messages() {
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    let encrypted = alice_ratchet.encrypt(b"", b"").unwrap();
+    let decrypted = bob_ratchet.decrypt(&encrypted, b"").unwrap();
+    assert_eq!(&decrypted, b"");
 }

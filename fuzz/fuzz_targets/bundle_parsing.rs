@@ -20,7 +20,7 @@ fuzz_target!(|data: &[u8]| {
         let signature = data[64..128].try_into().unwrap();
         let verifying_key = data[128..160].try_into().unwrap();
 
-        let bundle = signal_protocol::x3dh::Bundle {
+        let bundle = signal_protocol::x3dh::PreKeyBundle {
             identity_key,
             signed_prekey,
             signed_prekey_signature: signature,
