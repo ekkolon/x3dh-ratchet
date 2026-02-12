@@ -30,7 +30,6 @@ fuzz_target!(|data: &[u8]| {
             let mut corrupted = ciphertext.clone();
             corrupted[0] ^= 1;
             
-            // Should return error, not panic
             let _ = decrypt(&key, &nonce, &corrupted, b"");
         }
 

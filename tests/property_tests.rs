@@ -322,7 +322,7 @@ mod deterministic_tests {
 
     /// Property: Diffie-Hellman is commutative
     ///
-    /// DH(a, B) must equal DH(b, A) for all keypairs (fundamental DH property).
+    /// DH(a, B) must equal DH(b, A) for all keypairs.
     #[test]
     fn test_dh_commutativity() {
         let a = SecretKey::generate(&mut OsRng);

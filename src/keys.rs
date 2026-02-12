@@ -1,10 +1,6 @@
 //! Cryptographic key types with automatic memory safety and zeroization.
 
-use crate::{
-    crypto::KEY_SIZE_32,
-    error::{Error, Result},
-};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use crate::crypto::KEY_SIZE_32;
 use rand_core::CryptoRngCore;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -86,7 +82,7 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
 ///
 /// 32-byte scalar for Curve25519 ECDH. Memory is securely erased when
 /// the key goes out of scope to prevent key material leakage.
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SecretKey(StaticSecret);
 
@@ -94,6 +90,15 @@ impl SecretKey {
     /// Generates a new random secret key from a cryptographically secure RNG.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
         Self(StaticSecret::random_from_rng(rng))
+    }
+
+    /// Returns the raw secret key bytes (for XEdDSA conversion).
+    ///
+    /// # Security
+    /// Handle with care - exposes raw key material.
+    /// Used internally for XEdDSA key conversion.
+    pub(crate) fn as_bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
     }
 
     /// Creates a secret key from raw bytes.
@@ -149,105 +154,45 @@ impl std::fmt::Debug for DhOutput {
     }
 }
 
-/// Ed25519 signing keypair for identity authentication.
+/// Identity keypair for X3DH protocol.
 ///
-/// Contains both signing (private) and verifying (public) keys.
-/// Used to sign prekey bundles in X3DH protocol.
-pub struct SigningKeyPair {
-    signing: SigningKey,
-    verifying: VerifyingKey,
-}
-
-impl SigningKeyPair {
-    /// Generates a new random Ed25519 signing keypair.
-    pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
-        let signing = SigningKey::generate(rng);
-        let verifying = signing.verifying_key();
-        Self { signing, verifying }
-    }
-
-    /// Returns the verifying (public) key.
-    #[must_use]
-    pub fn verifying_key(&self) -> &VerifyingKey {
-        &self.verifying
-    }
-
-    /// Signs a message producing a 64-byte Ed25519 signature.
-    ///
-    /// The signature can be verified by anyone with the corresponding
-    /// verifying key, proving the signer possessed the signing key.
-    #[must_use]
-    pub fn sign(&self, message: &[u8]) -> Signature {
-        self.signing.sign(message)
-    }
-
-    /// Returns the verifying key as raw bytes.
-    #[must_use]
-    pub fn verifying_key_bytes(&self) -> [u8; KEY_SIZE_32] {
-        self.verifying.to_bytes()
-    }
-}
-
-impl std::fmt::Debug for SigningKeyPair {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SigningKeyPair {{ verifying: {:?} }}", self.verifying)
-    }
-}
-
-/// Verifies an Ed25519 signature in constant time.
+/// Contains a single X25519 keypair that serves dual purposes:
+/// 1. Diffie-Hellman key agreement (via X25519)
+/// 2. Digital signatures (via XEdDSA - X25519-derived EdDSA)
 ///
-/// # Arguments
-/// * `public_key` - 32-byte Ed25519 public key
-/// * `message` - Message that was signed
-/// * `signature` - 64-byte Ed25519 signature
-///
-/// # Errors
-/// Returns error if:
-/// - Public key encoding is invalid
-/// - Signature verification fails (wrong key or corrupted signature)
-pub fn verify_signature(public_key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> Result<()> {
-    let verifying_key =
-        VerifyingKey::from_bytes(public_key).map_err(|_| Error::InvalidPublicKey)?;
-    let sig = Signature::from_bytes(signature);
-    verifying_key
-        .verify(message, &sig)
-        .map_err(|_| Error::InvalidSignature)
-}
-
-/// Combined identity keypair for X3DH protocol.
-///
-/// Contains both an X25519 key for DH key agreement and an Ed25519 key
-/// for signing prekey bundles. Represents a long-term identity.
-#[derive(Debug)]
+/// This unified approach eliminates the need for separate signing keys
+/// while maintaining security properties of both ECDH and EdDSA.
+#[derive(Clone, Debug)]
 pub struct IdentityKeyPair {
-    /// X25519 secret key for Diffie-Hellman key agreement
-    pub dh_key: SecretKey,
-
-    /// Ed25519 keypair for signing prekey bundles
-    pub signing_key: SigningKeyPair,
+    /// X25519 secret key (used for both DH and XEdDSA signing)
+    secret: SecretKey,
+    /// Cached X25519 public key
+    public: PublicKey,
 }
 
 impl IdentityKeyPair {
     /// Generates a new random identity keypair.
     ///
-    /// Creates independent X25519 and Ed25519 keypairs from the provided RNG.
+    /// Creates a single X25519 keypair that can be used for both
+    /// Diffie-Hellman key agreement and XEdDSA signatures.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
-        Self {
-            dh_key: SecretKey::generate(rng),
-            signing_key: SigningKeyPair::generate(rng),
-        }
+        let secret = SecretKey::generate(rng);
+        let public = secret.public_key();
+        Self { secret, public }
     }
 
-    /// Returns the X25519 public key component.
+    /// Returns the X25519 public key.
     #[must_use]
-    pub fn public_key(&self) -> PublicKey {
-        self.dh_key.public_key()
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public
     }
 
-    /// Returns the Ed25519 verifying key component.
+    /// Returns a reference to the secret key.
+    ///
+    /// Used for Diffie-Hellman operations and XEdDSA signing.
     #[must_use]
-    pub fn verifying_key(&self) -> &VerifyingKey {
-        self.signing_key.verifying_key()
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.secret
     }
 }
 
@@ -278,31 +223,25 @@ mod tests {
     }
 
     #[test]
-    fn test_signing() {
-        let keypair = SigningKeyPair::generate(&mut OsRng);
-        let message = b"test message";
-        let signature = keypair.sign(message);
+    fn test_identity_keypair() {
+        let identity = IdentityKeyPair::generate(&mut OsRng);
 
-        verify_signature(
-            &keypair.verifying_key_bytes(),
-            message,
-            &signature.to_bytes(),
-        )
-        .expect("signature should verify");
+        // Public key should match derived key
+        let derived_public = identity.secret_key().public_key();
+        assert_eq!(identity.public_key().as_bytes(), derived_public.as_bytes());
     }
 
     #[test]
-    fn test_invalid_signature() {
-        let keypair = SigningKeyPair::generate(&mut OsRng);
-        let message = b"test message";
-        let wrong_message = b"wrong message";
-        let signature = keypair.sign(message);
+    fn test_dh_symmetry() {
+        let alice_secret = SecretKey::generate(&mut OsRng);
+        let bob_secret = SecretKey::generate(&mut OsRng);
 
-        let result = verify_signature(
-            &keypair.verifying_key_bytes(),
-            wrong_message,
-            &signature.to_bytes(),
-        );
-        assert!(result.is_err());
+        let alice_public = alice_secret.public_key();
+        let bob_public = bob_secret.public_key();
+
+        let dh1 = alice_secret.diffie_hellman(&bob_public);
+        let dh2 = bob_secret.diffie_hellman(&alice_public);
+
+        assert_eq!(dh1.as_bytes(), dh2.as_bytes(), "DH must be symmetric!");
     }
 }

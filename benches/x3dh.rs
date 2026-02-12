@@ -109,13 +109,13 @@ fn bench_x3dh_operations(c: &mut Criterion) {
     group.bench_function("dh_operations_4x", |b| {
         let eph = SecretKey::generate(&mut OsRng);
         b.iter(|| {
-            let dh1 = identity.dh_key.diffie_hellman(&bundle.signed_prekey);
+            let dh1 = identity.secret_key().diffie_hellman(&bundle.signed_prekey);
             let dh2 = eph.diffie_hellman(&bundle.identity_key);
             let dh3 = eph.diffie_hellman(&bundle.signed_prekey);
             let dh4 = bundle
                 .one_time_prekey
                 .as_ref()
-                .map(|opk| eph.diffie_hellman(opk));
+                .map(|opk| eph.diffie_hellman(&opk.1));
             black_box((dh1, dh2, dh3, dh4))
         });
     });

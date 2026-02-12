@@ -36,3 +36,12 @@ name = "header_parsing"
 path = "fuzz_targets/header_parsing.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "xeddsa"
+path = "fuzz_targets/xeddsa.rs"
+test = false
+doc = false
+
+[package.metadata.cargo-machete]
+ignored = ["signal-protocol-rs"]
