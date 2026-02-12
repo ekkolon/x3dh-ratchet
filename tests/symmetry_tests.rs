@@ -1,5 +1,5 @@
 use rand_core::OsRng;
-use signal_protocol::{
+use x3dh_ratchet::{
     DoubleRatchet, Error, IdentityKeyPair, PreKeyState, SecretKey,
     x3dh::{initiate, respond},
 };

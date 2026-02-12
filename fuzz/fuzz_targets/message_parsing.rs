@@ -5,7 +5,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use signal_protocol::double_ratchet::Message;
+use x3dh_ratchet::double_ratchet::Message;
 
 fuzz_target!(|data: &[u8]| {
     // Try to deserialize arbitrary data as a message

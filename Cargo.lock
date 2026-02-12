@@ -1048,32 +1048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-protocol-rs"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "chacha20poly1305",
- "criterion",
- "curve25519-dalek",
- "ed25519-dalek",
- "hex",
- "hkdf",
- "hmac",
- "proptest",
- "quickcheck",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "serde",
- "serde_arrays",
- "serde_json",
- "sha2",
- "subtle",
- "thiserror",
- "x25519-dalek",
- "zeroize",
-]
-
-[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1463,6 +1437,32 @@ dependencies = [
  "curve25519-dalek",
  "rand_core 0.6.4",
  "serde",
+ "zeroize",
+]
+
+[[package]]
+name = "x3dh-ratchet"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "chacha20poly1305",
+ "criterion",
+ "curve25519-dalek",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "hmac",
+ "proptest",
+ "quickcheck",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_arrays",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "thiserror",
+ "x25519-dalek",
  "zeroize",
 ]
 

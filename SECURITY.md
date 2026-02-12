@@ -95,7 +95,7 @@ encrypt() -> ChaCha20-Poly1305 AEAD
 ### Responsible Disclosure
 
 1. **Email**: security@example.com (PGP key: [link])
-2. **Subject**: `[SECURITY] signal-protocol-rs: <brief description>`
+2. **Subject**: `[SECURITY] x3dh-ratchet: <brief description>`
 3. **Include**:
    - Description of vulnerability
    - Steps to reproduce
