@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Nelson Dominguez <ekkolon@proton.me>"]
-license = "MIT OR Apache-2.0"
-description = "Production-grade X3DH and Double Ratchet implementation"
-repository = "https://github.com/ekkolon/signal-protocol-rs"
+license-file = "LICENSE"
+readme = "README.md"
+description = "Cryptographic primitives based on the Signal Protocol for secure asynchronous messaging with forward secrecy and cryptographic deniability"
+repository = "https://github.com/ekkolon/x3dh-ratchet"
 keywords = ["cryptography", "x3dh", "double-ratchet", "signal", "e2ee"]
 categories = ["cryptography", "no-std"]
 
