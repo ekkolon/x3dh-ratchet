@@ -464,7 +464,7 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
@@ -493,7 +493,7 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
 
@@ -502,7 +502,7 @@ mod tests {
             DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
 
         for i in 0..10 {
-            let msg = format!("Message {}", i);
+            let msg = format!("Message {i}");
             let encrypted = alice_ratchet.encrypt(msg.as_bytes(), b"").unwrap();
             assert!(encrypted.ciphertext.len() > msg.len());
         }
@@ -518,7 +518,7 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh =
             initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         let bob_x3dh =

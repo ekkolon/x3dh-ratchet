@@ -47,7 +47,7 @@
 //! let identity = IdentityKeyPair::generate(&mut OsRng);
 //!
 //! // Generate signed prekey and one-time prekeys
-//! let prekey_state = PreKeyState::generate(&mut OsRng, &identity);
+//! let prekey_state = PreKeyState::generate(&mut OsRng, &identity).unwrap();
 //!
 //! // Publish this bundle to a server
 //! let bundle = prekey_state.public_bundle();
@@ -59,7 +59,7 @@
 //! # use signal_protocol::keys::SecretKey;
 //! # use rand_core::OsRng;
 //! let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-//! let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+//! let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
 //! let bundle = bob_prekeys.public_bundle();
 //!
 //! // Fetch Bob's prekey bundle from server
@@ -85,7 +85,7 @@
 //! # use signal_protocol::keys::SecretKey;
 //! # use rand_core::OsRng;
 //! let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-//! let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+//! let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
 //! let bundle = bob_prekeys.public_bundle();
 //!
 //! let alice_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -116,7 +116,7 @@
 //! let alice_identity = IdentityKeyPair::generate(&mut OsRng);
 //!
 //! let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-//! let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+//! let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
 //! let bundle = bob_prekeys.public_bundle();
 //!
 //! let init_result = x3dh::initiate(&mut OsRng, &alice_identity, &bundle).unwrap();

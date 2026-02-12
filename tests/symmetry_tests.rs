@@ -10,7 +10,7 @@ fn test_x3dh_formal_symmetry_multiple_runs() {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
@@ -31,7 +31,7 @@ fn test_identity_substitution_breaks_agreement() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     let mut modified_bundle = bundle.clone();
@@ -47,13 +47,13 @@ fn test_dh_input_sensitivity() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     let alice_x3dh_1 = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
 
     // Regenerate Bob's signed prekey
-    let bob_prekeys_2 = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys_2 = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle2 = bob_prekeys_2.public_bundle();
 
     let alice_x3dh_2 = initiate(&mut OsRng, &alice_identity, &bundle2).unwrap();
@@ -70,7 +70,7 @@ fn test_root_chain_key_separation() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let _bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -94,7 +94,7 @@ fn test_ratchet_state_persistence() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -132,7 +132,7 @@ fn test_ratchet_serialization_determinism() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -150,7 +150,7 @@ fn test_identity_substitution_attempts() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let original_bundle = bob_prekeys.public_bundle();
 
     assert!(original_bundle.verify_signature().is_ok());
@@ -193,7 +193,7 @@ fn test_identity_substitution_attempts() {
 #[test]
 fn test_signature_cannot_be_reused() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle1 = bob_prekeys.public_bundle();
 
     // Second bundle with different signed prekey but same signature
@@ -213,7 +213,7 @@ fn test_mitm_full_attempt_scenario() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let mut bundle = bob_prekeys.public_bundle();
 
     // MITM replaces Bob's identity key with attempter's
@@ -231,8 +231,12 @@ fn test_xeddsa_signature_uniqueness() {
     // Verify that two signatures of the same message are different (randomized signing)
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bundle1 = PreKeyState::generate(&mut OsRng, &bob_identity).public_bundle();
-    let bundle2 = PreKeyState::generate(&mut OsRng, &bob_identity).public_bundle();
+    let bundle1 = PreKeyState::generate(&mut OsRng, &bob_identity)
+        .unwrap()
+        .public_bundle();
+    let bundle2 = PreKeyState::generate(&mut OsRng, &bob_identity)
+        .unwrap()
+        .public_bundle();
 
     // Same identity, different signed prekeys
     assert_eq!(
@@ -261,8 +265,8 @@ fn test_xeddsa_cross_bundle_signature_reuse_fails() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let eve_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
-    let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
+    let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity).unwrap();
 
     let bob_bundle = bob_prekeys.public_bundle();
     let mut eve_bundle = eve_prekeys.public_bundle();

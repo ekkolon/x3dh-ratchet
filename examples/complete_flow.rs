@@ -20,7 +20,7 @@ fn main() -> Result<()> {
 
     // Bob publishes prekey bundle
     println!("2. Bob generates and publishes prekey bundle...");
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bob_bundle = bob_prekeys.public_bundle();
     println!("   ✓ Bob's bundle ready for distribution");
     println!("   - Identity key: {:?}", bob_bundle.identity_key);
@@ -96,11 +96,9 @@ fn main() -> Result<()> {
     assert_eq!(&decrypted2, msg2);
 
     // Alice sends multiple messages
-    let messages = vec![
-        b"I'm doing great!".as_slice(),
+    let messages = [b"I'm doing great!".as_slice(),
         b"How about you?".as_slice(),
-        b"Want to meet up later?".as_slice(),
-    ];
+        b"Want to meet up later?".as_slice()];
 
     for (i, msg) in messages.iter().enumerate() {
         println!(
