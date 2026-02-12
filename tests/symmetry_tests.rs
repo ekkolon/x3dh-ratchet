@@ -88,64 +88,6 @@ fn test_root_chain_key_separation() {
 }
 
 #[test]
-fn test_ratchet_state_persistence() {
-    use serde_json;
-
-    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
-    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
-    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
-
-    let bob_dh = SecretKey::generate(&mut OsRng);
-
-    let mut alice_ratchet =
-        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
-    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
-
-    // Establish session
-    let msg1 = alice_ratchet.encrypt(b"hello", b"").unwrap();
-    bob_ratchet.decrypt(&msg1, b"").unwrap();
-
-    let serialized = serde_json::to_vec(&bob_ratchet).unwrap();
-
-    let mut restored: DoubleRatchet = serde_json::from_slice(&serialized).unwrap();
-
-    // Continue ratchet
-    let msg2 = alice_ratchet.encrypt(b"after restore", b"").unwrap();
-    let decrypted = restored.decrypt(&msg2, b"").unwrap();
-
-    assert_eq!(&decrypted, b"after restore");
-
-    // Ensure state actually advanced and no reuse occurred
-    let msg3 = alice_ratchet.encrypt(b"next", b"").unwrap();
-    let decrypted2 = restored.decrypt(&msg3, b"").unwrap();
-
-    assert_eq!(&decrypted2, b"next");
-}
-
-#[test]
-fn test_ratchet_serialization_determinism() {
-    use serde_json;
-
-    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
-    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
-    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
-
-    let bob_dh = SecretKey::generate(&mut OsRng);
-    let bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
-
-    let s1 = serde_json::to_vec(&bob_ratchet).unwrap();
-    let s2 = serde_json::to_vec(&bob_ratchet).unwrap();
-
-    assert_eq!(s1, s2, "Serialization must be deterministic");
-}
-
-#[test]
 fn test_identity_substitution_attempts() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -278,4 +220,64 @@ fn test_xeddsa_cross_bundle_signature_reuse_fails() {
         eve_bundle.verify_signature().is_err(),
         "Signature from different identity should not verify"
     );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_ratchet_state_persistence() {
+    use serde_json;
+
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+
+    let mut alice_ratchet =
+        DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
+    let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    // Establish session
+    let msg1 = alice_ratchet.encrypt(b"hello", b"").unwrap();
+    bob_ratchet.decrypt(&msg1, b"").unwrap();
+
+    let serialized = serde_json::to_vec(&bob_ratchet).unwrap();
+
+    let mut restored: DoubleRatchet = serde_json::from_slice(&serialized).unwrap();
+
+    // Continue ratchet
+    let msg2 = alice_ratchet.encrypt(b"after restore", b"").unwrap();
+    let decrypted = restored.decrypt(&msg2, b"").unwrap();
+
+    assert_eq!(&decrypted, b"after restore");
+
+    // Ensure state actually advanced and no reuse occurred
+    let msg3 = alice_ratchet.encrypt(b"next", b"").unwrap();
+    let decrypted2 = restored.decrypt(&msg3, b"").unwrap();
+
+    assert_eq!(&decrypted2, b"next");
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_ratchet_serialization_determinism() {
+    use serde_json;
+
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
+    let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
+
+    let bob_dh = SecretKey::generate(&mut OsRng);
+    let bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
+
+    let s1 = serde_json::to_vec(&bob_ratchet).unwrap();
+    let s2 = serde_json::to_vec(&bob_ratchet).unwrap();
+
+    assert_eq!(s1, s2, "Serialization must be deterministic");
 }
