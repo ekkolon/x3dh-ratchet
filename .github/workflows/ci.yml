@@ -51,12 +51,8 @@ jobs:
           RUST_BACKTRACE: 1
         run: cargo test --workspace --all-targets --all-features -- --nocapture
 
-      - name: Build documentation
-        run: cargo doc --all-features --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
 
-  doc:
+  docs:
     name: Documentation
     runs-on: ubuntu-latest
     needs:
