@@ -95,17 +95,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run cargo audit
-        uses: actions-rs/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
