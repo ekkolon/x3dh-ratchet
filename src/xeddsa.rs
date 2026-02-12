@@ -75,13 +75,13 @@ impl XEdDSAPrivateKey {
     }
 
     /// Returns the `XEdDSA` public key.
-    #[must_use] 
+    #[must_use]
     pub fn public_key(&self) -> &XEdDSAPublicKey {
         &self.public
     }
 
     /// Signs a message with `XEdDSA`.
-    #[must_use] 
+    #[must_use]
     pub fn sign(&self, message: &[u8], random: &[u8; 64]) -> [u8; SIGNATURE_LENGTH] {
         // r = hash1(a || M || Z) (mod q)
         let r = self.hash1_scalar(message, random);
@@ -162,7 +162,7 @@ impl XEdDSAPublicKey {
     }
 
     /// Returns the compressed Edwards Y coordinate.
-    #[must_use] 
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.compressed.as_bytes()
     }
