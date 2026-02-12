@@ -39,8 +39,8 @@
 //!
 //! ## 1. Setup (Responder/Bob)
 //! ```rust
-//! use signal_protocol::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
-//! use signal_protocol::keys::SecretKey;
+//! use x3dh_ratchet::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
+//! use x3dh_ratchet::keys::SecretKey;
 //! use rand_core::OsRng;
 //!
 //! // Generate long-term identity
@@ -55,8 +55,8 @@
 //!
 //! ## 2. Initial Key Agreement (Initiator/Alice)
 //! ```no_run
-//! # use signal_protocol::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
-//! # use signal_protocol::keys::SecretKey;
+//! # use x3dh_ratchet::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
+//! # use x3dh_ratchet::keys::SecretKey;
 //! # use rand_core::OsRng;
 //! let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 //! let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
@@ -81,8 +81,8 @@
 //!
 //! ## 3. Response (Responder/Bob)
 //! ```no_run
-//! # use signal_protocol::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
-//! # use signal_protocol::keys::SecretKey;
+//! # use x3dh_ratchet::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
+//! # use x3dh_ratchet::keys::SecretKey;
 //! # use rand_core::OsRng;
 //! let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 //! let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
@@ -110,8 +110,8 @@
 //!
 //! ## 4. Messaging
 //! ```no_run
-//! # use signal_protocol::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
-//! # use signal_protocol::keys::SecretKey;
+//! # use x3dh_ratchet::{IdentityKeyPair, PreKeyState, x3dh, DoubleRatchet};
+//! # use x3dh_ratchet::keys::SecretKey;
 //! # use rand_core::OsRng;
 //! let alice_identity = IdentityKeyPair::generate(&mut OsRng);
 //!

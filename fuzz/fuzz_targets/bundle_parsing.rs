@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use signal_protocol::keys::PublicKey;
-use signal_protocol::xeddsa::SIGNATURE_LENGTH;
+use x3dh_ratchet::keys::PublicKey;
+use x3dh_ratchet::xeddsa::SIGNATURE_LENGTH;
 
 fuzz_target!(|data: &[u8]| {
     // Try to parse as public key
@@ -35,7 +35,7 @@ fuzz_target!(|data: &[u8]| {
             None
         };
 
-        let bundle = signal_protocol::x3dh::PreKeyBundle {
+        let bundle = x3dh_ratchet::x3dh::PreKeyBundle {
             identity_key,
             signed_prekey,
             signed_prekey_signature: signature,

@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use signal_protocol::keys::PublicKey;
-use signal_protocol::xeddsa::{SIGNATURE_LENGTH, XEdDSAPublicKey};
+use x3dh_ratchet::keys::PublicKey;
+use x3dh_ratchet::xeddsa::{SIGNATURE_LENGTH, XEdDSAPublicKey};
 
 fuzz_target!(|data: &[u8]| {
     // Try to verify arbitrary signatures with arbitrary public keys

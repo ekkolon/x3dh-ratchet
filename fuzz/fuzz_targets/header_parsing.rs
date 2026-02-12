@@ -3,7 +3,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use signal_protocol::double_ratchet::Header;
+use x3dh_ratchet::double_ratchet::Header;
 
 fuzz_target!(|data: &[u8]| {
     // Try to parse header from arbitrary data

@@ -1,10 +1,10 @@
 // tests/integration_tests.rs (or similar)
 
 use chacha20poly1305::aead::OsRng;
-use signal_protocol::Error;
-use signal_protocol::double_ratchet::{DoubleRatchet, Header, Message};
-use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{PreKeyState, initiate, respond};
+use x3dh_ratchet::Error;
+use x3dh_ratchet::double_ratchet::{DoubleRatchet, Header, Message};
+use x3dh_ratchet::keys::{IdentityKeyPair, SecretKey};
+use x3dh_ratchet::x3dh::{PreKeyState, initiate, respond};
 
 /// X3DH key agreement + Double Ratchet messaging
 #[test]

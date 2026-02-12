@@ -1,8 +1,8 @@
 use proptest::prelude::*;
 use rand_core::OsRng;
-use signal_protocol::double_ratchet::DoubleRatchet;
-use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{PreKeyState, initiate, respond};
+use x3dh_ratchet::double_ratchet::DoubleRatchet;
+use x3dh_ratchet::keys::{IdentityKeyPair, SecretKey};
+use x3dh_ratchet::x3dh::{PreKeyState, initiate, respond};
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
@@ -290,7 +290,7 @@ proptest! {
 #[cfg(test)]
 mod deterministic_tests {
     use super::*;
-    use signal_protocol::crypto::{SymmetricKey, kdf_chain};
+    use x3dh_ratchet::crypto::{SymmetricKey, kdf_chain};
 
     /// Property: KDF is deterministic
     ///
