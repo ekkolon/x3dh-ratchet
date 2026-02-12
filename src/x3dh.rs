@@ -62,7 +62,7 @@ pub struct PreKeyBundle {
     /// Medium-term signed prekey (X25519 public key)
     pub signed_prekey: PublicKey,
 
-    /// XEdDSA signature over (identity_key || signed_prekey)
+    /// `XEdDSA` signature over (`identity_key` || `signed_prekey`)
     /// Signature is 64 bytes: R (32) || s (32)
     #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
     pub signed_prekey_signature: [u8; SIGNATURE_LENGTH],
@@ -73,7 +73,7 @@ pub struct PreKeyBundle {
 }
 
 impl PreKeyBundle {
-    /// Verifies the XEdDSA signature on the signed prekey.
+    /// Verifies the `XEdDSA` signature on the signed prekey.
     ///
     /// Ensures the bundle was created by the owner of the identity key
     /// and hasn't been tampered with.
@@ -117,7 +117,10 @@ impl PreKeyState {
     /// * `rng` - Cryptographically secure RNG
     /// * `identity` - Long-term identity keypair
     /// * `num_one_time_keys` - Number of one-time prekeys to generate (default: 100)
-    pub fn generate<R: CryptoRngCore>(rng: &mut R, identity: &IdentityKeyPair) -> Self {
+    pub fn generate<R: CryptoRngCore>(
+        rng: &mut R,
+        identity: &IdentityKeyPair,
+    ) -> crate::Result<Self> {
         Self::generate_with_count(rng, identity, 100)
     }
 
@@ -126,7 +129,7 @@ impl PreKeyState {
         rng: &mut R,
         identity: &IdentityKeyPair,
         num_one_time_keys: u32,
-    ) -> Self {
+    ) -> crate::Result<Self> {
         let signed_prekey = SecretKey::generate(rng);
 
         // Create XEdDSA signature over (identity_key || signed_prekey)
@@ -140,8 +143,7 @@ impl PreKeyState {
 
         // Convert identity key to XEdDSA and sign
         let xeddsa_private =
-            XEdDSAPrivateKey::from_x25519_private(identity.secret_key().as_bytes())
-                .expect("Failed to convert identity key to XEdDSA");
+            XEdDSAPrivateKey::from_x25519_private(identity.secret_key().as_bytes())?;
 
         let signed_prekey_signature = xeddsa_private.sign(&message, &random);
 
@@ -151,18 +153,19 @@ impl PreKeyState {
             one_time_prekeys.insert(i, SecretKey::generate(rng));
         }
 
-        Self {
+        Ok(Self {
             identity: identity.clone(),
             signed_prekey,
             signed_prekey_signature,
             one_time_prekeys,
             next_opk_id: num_one_time_keys,
-        }
+        })
     }
 
     /// Returns the public prekey bundle for distribution.
     ///
     /// Includes an available one-time prekey if any remain.
+    #[must_use]
     pub fn public_bundle(&self) -> PreKeyBundle {
         let one_time_prekey = self
             .one_time_prekeys
@@ -195,16 +198,19 @@ impl PreKeyState {
     }
 
     /// Returns reference to identity keypair.
+    #[must_use]
     pub fn identity(&self) -> &IdentityKeyPair {
         &self.identity
     }
 
     /// Returns reference to signed prekey secret.
+    #[must_use]
     pub fn signed_prekey(&self) -> &SecretKey {
         &self.signed_prekey
     }
 
     /// Returns number of available one-time prekeys.
+    #[must_use]
     pub fn one_time_prekey_count(&self) -> usize {
         self.one_time_prekeys.len()
     }
@@ -378,7 +384,7 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         assert!(bundle.verify_signature().is_ok());
@@ -405,7 +411,8 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+        let mut bob_prekeys =
+            PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         assert!(bundle.verify_signature().is_ok());
@@ -429,7 +436,7 @@ mod tests {
     #[test]
     fn test_invalid_signature() {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let mut bundle = bob_prekeys.public_bundle();
 
         // Corrupt the signature
@@ -443,7 +450,7 @@ mod tests {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
         let eve_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let original_bundle = bob_prekeys.public_bundle();
 
         assert!(original_bundle.verify_signature().is_ok());
@@ -459,7 +466,7 @@ mod tests {
     #[test]
     fn test_signature_non_reusable() {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         // attempt to reuse signature with different signed prekey
@@ -475,14 +482,14 @@ mod tests {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
         let eve_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity);
+        let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity).unwrap();
         let eve_bundle = eve_prekeys.public_bundle();
 
         // Alice initiates with what she thinks is Bob's bundle (but is Eve's)
         let alice_result = initiate(&mut OsRng, &alice_identity, &eve_bundle).unwrap();
 
         // Eve cannot present this to Bob because Bob will derive different secret
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bob_result = respond(
             &mut bob_prekeys,
             &bob_identity,

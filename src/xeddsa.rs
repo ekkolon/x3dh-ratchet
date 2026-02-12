@@ -1,7 +1,7 @@
-//! XEdDSA signature scheme for X25519 keys.
+//! `XEdDSA` signature scheme for X25519 keys.
 //!
-//! Implements the XEdDSA signature scheme from:
-//! "The XEdDSA and VXEdDSA Signature Schemes" by Trevor Perrin
+//! Implements the `XEdDSA` signature scheme from:
+//! "The `XEdDSA` and `VXEdDSA` Signature Schemes" by Trevor Perrin
 //! Revision 1, 2016-10-20
 
 use crate::error::{Error, Result};
@@ -17,10 +17,10 @@ use subtle::ConstantTimeEq;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// XEdDSA signature: 64 bytes (R point + s scalar)
+/// `XEdDSA` signature: 64 bytes (R point + s scalar)
 pub const SIGNATURE_LENGTH: usize = 64;
 
-/// XEd25519 signing key derived from X25519 private key
+/// `XEd25519` signing key derived from X25519 private key
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct XEdDSAPrivateKey {
     /// X25519 private scalar k (clamped)
@@ -32,7 +32,7 @@ pub struct XEdDSAPrivateKey {
     public: XEdDSAPublicKey,
 }
 
-/// XEd25519 public key (Ed25519 point derived from X25519)
+/// `XEd25519` public key (Ed25519 point derived from X25519)
 #[derive(Clone, Copy, Debug)]
 pub struct XEdDSAPublicKey {
     /// Compressed Ed25519 point
@@ -40,9 +40,9 @@ pub struct XEdDSAPublicKey {
 }
 
 impl XEdDSAPrivateKey {
-    /// Creates XEdDSA signing key from X25519 private key bytes.
+    /// Creates `XEdDSA` signing key from X25519 private key bytes.
     ///
-    /// Takes raw secret bytes and derives both the X25519 public key and EdDSA signing key.
+    /// Takes raw secret bytes and derives both the X25519 public key and `EdDSA` signing key.
     pub fn from_x25519_private(k_bytes: &[u8; 32]) -> Result<Self> {
         // Create a StaticSecret to leverage x25519-dalek's key derivation
         let secret = StaticSecret::from(*k_bytes);
@@ -74,12 +74,14 @@ impl XEdDSAPrivateKey {
         })
     }
 
-    /// Returns the XEdDSA public key.
+    /// Returns the `XEdDSA` public key.
+    #[must_use] 
     pub fn public_key(&self) -> &XEdDSAPublicKey {
         &self.public
     }
 
-    /// Signs a message with XEdDSA.
+    /// Signs a message with `XEdDSA`.
+    #[must_use] 
     pub fn sign(&self, message: &[u8], random: &[u8; 64]) -> [u8; SIGNATURE_LENGTH] {
         // r = hash1(a || M || Z) (mod q)
         let r = self.hash1_scalar(message, random);
@@ -107,8 +109,8 @@ impl XEdDSAPrivateKey {
         let mut hasher = Sha512::new();
 
         // Domain separation: hash1 = hash(0xFE || 0xFF^31 || ...)
-        hasher.update(&[0xFE]);
-        hasher.update(&[0xFF; 31]);
+        hasher.update([0xFE]);
+        hasher.update([0xFF; 31]);
 
         // a || M || Z
         hasher.update(self.a.as_bytes());
@@ -132,12 +134,12 @@ impl XEdDSAPrivateKey {
 }
 
 impl XEdDSAPublicKey {
-    /// Creates XEdDSA public key from X25519 public key.
+    /// Creates `XEdDSA` public key from X25519 public key.
     pub fn from_x25519_public(public_key: &PublicKey) -> Result<Self> {
         Self::from_x25519_public_bytes(public_key.as_bytes())
     }
 
-    /// Creates XEdDSA public key from X25519 public key bytes.
+    /// Creates `XEdDSA` public key from X25519 public key bytes.
     fn from_x25519_public_bytes(u_bytes: &[u8; 32]) -> Result<Self> {
         // Mask high bits per XEdDSA spec
         let mut u_masked = *u_bytes;
@@ -160,11 +162,12 @@ impl XEdDSAPublicKey {
     }
 
     /// Returns the compressed Edwards Y coordinate.
+    #[must_use] 
     pub fn as_bytes(&self) -> &[u8; 32] {
         self.compressed.as_bytes()
     }
 
-    /// Verifies an XEdDSA signature.
+    /// Verifies an `XEdDSA` signature.
     pub fn verify(&self, message: &[u8], signature: &[u8; SIGNATURE_LENGTH]) -> Result<()> {
         // Parse signature R || s
         let mut r_bytes = [0u8; 32];
@@ -289,7 +292,7 @@ mod tests {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         assert!(

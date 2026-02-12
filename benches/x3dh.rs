@@ -24,7 +24,7 @@ fn bench_x3dh_handshake(c: &mut Criterion) {
 
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     group.bench_function("initiate", |b| {
@@ -34,7 +34,7 @@ fn bench_x3dh_handshake(c: &mut Criterion) {
     group.bench_function("respond", |b| {
         b.iter(|| {
             // ✅ FIX: Generate fresh state AND fresh init_result per iteration
-            let mut state = PreKeyState::generate(&mut OsRng, &bob_identity);
+            let mut state = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
             let bundle = state.public_bundle();
             let init_result = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
 
@@ -46,7 +46,7 @@ fn bench_x3dh_handshake(c: &mut Criterion) {
         b.iter(|| {
             let alice = IdentityKeyPair::generate(&mut OsRng);
             let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-            let mut bob_state = PreKeyState::generate(&mut OsRng, &bob_identity);
+            let mut bob_state = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
             let bundle = bob_state.public_bundle();
 
             let init = initiate(&mut OsRng, &alice, &bundle).unwrap();
@@ -63,11 +63,14 @@ fn bench_signature_verification(c: &mut Criterion) {
     let mut group = c.benchmark_group("signature_verification");
 
     let identity = IdentityKeyPair::generate(&mut OsRng);
-    let prekeys = PreKeyState::generate(&mut OsRng, &identity);
+    let prekeys = PreKeyState::generate(&mut OsRng, &identity).unwrap();
     let bundle = prekeys.public_bundle();
 
     group.bench_function("verify_bundle_signature", |b| {
-        b.iter(|| black_box(bundle.verify_signature().unwrap()));
+        b.iter(|| {
+            bundle.verify_signature().unwrap();
+            black_box(())
+        });
     });
 
     group.finish();
@@ -95,7 +98,7 @@ fn bench_x3dh_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("x3dh_operations");
 
     let identity = IdentityKeyPair::generate(&mut OsRng);
-    let prekeys = PreKeyState::generate(&mut OsRng, &identity);
+    let prekeys = PreKeyState::generate(&mut OsRng, &identity).unwrap();
     let bundle = prekeys.public_bundle();
 
     group.bench_function("bundle_creation", |b| {
@@ -103,7 +106,10 @@ fn bench_x3dh_operations(c: &mut Criterion) {
     });
 
     group.bench_function("bundle_verification", |b| {
-        b.iter(|| black_box(bundle.verify_signature().unwrap()));
+        b.iter(|| {
+            bundle.verify_signature().unwrap();
+            black_box(())
+        });
     });
 
     group.bench_function("dh_operations_4x", |b| {
@@ -129,7 +135,7 @@ fn bench_ratchet_init(c: &mut Criterion) {
 
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();

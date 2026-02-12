@@ -92,11 +92,11 @@ impl SecretKey {
         Self(StaticSecret::random_from_rng(rng))
     }
 
-    /// Returns the raw secret key bytes (for XEdDSA conversion).
+    /// Returns the raw secret key bytes (for `XEdDSA` conversion).
     ///
     /// # Security
     /// Handle with care - exposes raw key material.
-    /// Used internally for XEdDSA key conversion.
+    /// Used internally for `XEdDSA` key conversion.
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         self.0.as_bytes()
     }
@@ -158,13 +158,13 @@ impl std::fmt::Debug for DhOutput {
 ///
 /// Contains a single X25519 keypair that serves dual purposes:
 /// 1. Diffie-Hellman key agreement (via X25519)
-/// 2. Digital signatures (via XEdDSA - X25519-derived EdDSA)
+/// 2. Digital signatures (via `XEdDSA` - X25519-derived `EdDSA`)
 ///
 /// This unified approach eliminates the need for separate signing keys
-/// while maintaining security properties of both ECDH and EdDSA.
+/// while maintaining security properties of both ECDH and `EdDSA`.
 #[derive(Clone, Debug)]
 pub struct IdentityKeyPair {
-    /// X25519 secret key (used for both DH and XEdDSA signing)
+    /// X25519 secret key (used for both DH and `XEdDSA` signing)
     secret: SecretKey,
     /// Cached X25519 public key
     public: PublicKey,
@@ -174,7 +174,7 @@ impl IdentityKeyPair {
     /// Generates a new random identity keypair.
     ///
     /// Creates a single X25519 keypair that can be used for both
-    /// Diffie-Hellman key agreement and XEdDSA signatures.
+    /// Diffie-Hellman key agreement and `XEdDSA` signatures.
     pub fn generate<R: CryptoRngCore>(rng: &mut R) -> Self {
         let secret = SecretKey::generate(rng);
         let public = secret.public_key();
@@ -189,7 +189,7 @@ impl IdentityKeyPair {
 
     /// Returns a reference to the secret key.
     ///
-    /// Used for Diffie-Hellman operations and XEdDSA signing.
+    /// Used for Diffie-Hellman operations and `XEdDSA` signing.
     #[must_use]
     pub fn secret_key(&self) -> &SecretKey {
         &self.secret
