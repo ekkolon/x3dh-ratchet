@@ -1,8 +1,8 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use rand_core::OsRng;
-use signal_protocol::double_ratchet::DoubleRatchet;
-use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{PreKeyState, initiate, respond};
+use x3dh_ratchet::double_ratchet::DoubleRatchet;
+use x3dh_ratchet::keys::{IdentityKeyPair, SecretKey};
+use x3dh_ratchet::x3dh::{PreKeyState, initiate, respond};
 
 fn bench_key_generation(c: &mut Criterion) {
     let mut group = c.benchmark_group("key_generation");

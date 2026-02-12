@@ -5,7 +5,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use signal_protocol::crypto::{encrypt, decrypt, SymmetricKey};
+use x3dh_ratchet::crypto::{encrypt, decrypt, SymmetricKey};
 
 const NONCE_SIZE: usize = 12;
 

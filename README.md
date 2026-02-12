@@ -59,9 +59,9 @@ signal-protocol = { version = "0.1", features = ["serde"] }
 ## Quick Start
 
 ```rust
-use signal_protocol::keys::IdentityKeyPair;
-use signal_protocol::x3dh::{initiate, respond, PreKeyState};
-use signal_protocol::double_ratchet::DoubleRatchet;
+use x3dh_ratchet::keys::IdentityKeyPair;
+use x3dh_ratchet::x3dh::{initiate, respond, PreKeyState};
+use x3dh_ratchet::double_ratchet::DoubleRatchet;
 use rand_core::OsRng;
 
 // Responder (Bob) generates prekey bundle
@@ -294,7 +294,7 @@ if prekey_state.one_time_prekeys.len() < 10 {
 Implement custom storage backend:
 
 ```rust
-use signal_protocol::storage::PreKeyStorage;
+use x3dh_ratchet::storage::PreKeyStorage;
 
 struct DatabaseStorage { /* ... */ }
 

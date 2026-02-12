@@ -4,10 +4,10 @@
 //! a secure channel and exchange messages.
 
 use rand_core::OsRng;
-use signal_protocol::Result;
-use signal_protocol::double_ratchet::DoubleRatchet;
-use signal_protocol::keys::{IdentityKeyPair, SecretKey};
-use signal_protocol::x3dh::{PreKeyState, initiate, respond};
+use x3dh_ratchet::Result;
+use x3dh_ratchet::double_ratchet::DoubleRatchet;
+use x3dh_ratchet::keys::{IdentityKeyPair, SecretKey};
+use x3dh_ratchet::x3dh::{PreKeyState, initiate, respond};
 
 fn main() -> Result<()> {
     println!("=== Signal Protocol Complete Example ===\n");

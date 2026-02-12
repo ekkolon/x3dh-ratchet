@@ -41,7 +41,7 @@ pub trait PreKeyStore: Send + Sync {
 ///
 /// # Example
 /// ```no_run
-/// # use signal_protocol::storage::InMemoryPreKeyStore;
+/// # use x3dh_ratchet::storage::InMemoryPreKeyStore;
 /// let mut store = InMemoryPreKeyStore::new();
 /// // Store prekeys generated during setup...
 /// ```
