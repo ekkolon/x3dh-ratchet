@@ -96,9 +96,11 @@ fn main() -> Result<()> {
     assert_eq!(&decrypted2, msg2);
 
     // Alice sends multiple messages
-    let messages = [b"I'm doing great!".as_slice(),
+    let messages = [
+        b"I'm doing great!".as_slice(),
         b"How about you?".as_slice(),
-        b"Want to meet up later?".as_slice()];
+        b"Want to meet up later?".as_slice(),
+    ];
 
     for (i, msg) in messages.iter().enumerate() {
         println!(
