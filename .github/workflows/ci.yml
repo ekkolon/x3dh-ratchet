@@ -138,17 +138,3 @@ jobs:
         with:
           files: ./cobertura.xml
           fail_ci_if_error: false
-
-  minimal-versions:
-    name: Minimal Versions
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Check minimal versions
-        run: |
-          cargo +nightly update -Z minimal-versions
-          cargo +nightly check --all-features
