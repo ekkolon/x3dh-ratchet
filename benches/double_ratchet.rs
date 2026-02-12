@@ -8,7 +8,7 @@ fn setup_ratchet() -> (DoubleRatchet, DoubleRatchet) {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
@@ -157,8 +157,8 @@ fn bench_out_of_order(c: &mut Criterion) {
 
             // Decrypt in order: 5, 0, 1, 2, 3, 4
             bob.decrypt(&encrypted[5], b"").unwrap();
-            for i in 0..5 {
-                bob.decrypt(&encrypted[i], b"").unwrap();
+            for message in encrypted.iter().take(5) {
+                bob.decrypt(message, b"").unwrap();
             }
         });
     });

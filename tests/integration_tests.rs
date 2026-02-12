@@ -12,7 +12,7 @@ fn test_full_protocol_flow() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let bob_bundle = bob_prekeys.public_bundle();
 
     let alice_x3dh =
@@ -55,7 +55,7 @@ fn test_x3dh_without_one_time_prekey() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0).unwrap();
     let bundle = bob_prekeys.public_bundle();
 
     assert!(
@@ -77,7 +77,7 @@ fn test_out_of_order_messages() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -106,7 +106,7 @@ fn test_bidirectional_messaging() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -131,7 +131,7 @@ fn test_dh_ratchet_rotation() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -167,7 +167,7 @@ fn test_excessive_skipped_messages() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -203,7 +203,7 @@ fn test_message_replay_rejected() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -227,7 +227,7 @@ fn test_corrupted_ciphertext_rejected() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -249,7 +249,7 @@ fn test_corrupted_ciphertext_rejected() {
 #[test]
 fn test_invalid_signature_rejected() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let mut bundle = bob_prekeys.public_bundle();
 
     // Corrupt XEdDSA signature
@@ -265,7 +265,7 @@ fn test_invalid_signature_rejected() {
 #[test]
 fn test_one_time_prekey_consumption() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
 
     let count_before = bob_prekeys.one_time_prekey_count();
     assert!(count_before > 0);
@@ -284,7 +284,7 @@ fn test_one_time_prekey_consumption() {
 #[test]
 fn test_missing_one_time_prekey() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0).unwrap();
 
     assert_eq!(bob_prekeys.one_time_prekey_count(), 0);
 
@@ -325,7 +325,7 @@ fn test_associated_data_integrity() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -351,7 +351,7 @@ fn test_forward_secrecy() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -382,7 +382,7 @@ fn test_post_compromise_security() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -414,7 +414,7 @@ fn test_large_messages() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -436,7 +436,7 @@ fn test_empty_messages() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
     let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 

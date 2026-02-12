@@ -21,7 +21,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut rng);
         let bob_identity = IdentityKeyPair::generate(&mut rng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut rng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut rng, &bob_identity).unwrap();
         let bundle = bob_prekeys.public_bundle();
 
         let alice_x3dh = initiate(&mut rng, &alice_identity, &bundle).unwrap();
@@ -44,7 +44,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -74,7 +74,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -103,7 +103,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut rng);
         let bob_identity = IdentityKeyPair::generate(&mut rng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut rng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut rng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut rng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -136,7 +136,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -175,7 +175,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -201,7 +201,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         let bob_x3dh = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -227,7 +227,7 @@ proptest! {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity).unwrap();
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bob_prekeys.public_bundle()).unwrap();
         respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
@@ -263,7 +263,7 @@ proptest! {
         let mut rng1 = StdRng::seed_from_u64(seed1);
         let alice1 = IdentityKeyPair::generate(&mut rng1);
         let bob1 = IdentityKeyPair::generate(&mut rng1);
-        let mut bob_prekeys1 = PreKeyState::generate(&mut rng1, &bob1);
+        let mut bob_prekeys1 = PreKeyState::generate(&mut rng1, &bob1).unwrap();
         let alice_x3dh1 = initiate(&mut rng1, &alice1, &bob_prekeys1.public_bundle()).unwrap();
         respond(&mut bob_prekeys1, &bob1, &alice_x3dh1.initial_message).unwrap();
         let bob_dh1 = SecretKey::generate(&mut rng1);
@@ -273,7 +273,7 @@ proptest! {
         let mut rng2 = StdRng::seed_from_u64(seed2);
         let alice2 = IdentityKeyPair::generate(&mut rng2);
         let bob2 = IdentityKeyPair::generate(&mut rng2);
-        let mut bob_prekeys2 = PreKeyState::generate(&mut rng2, &bob2);
+        let mut bob_prekeys2 = PreKeyState::generate(&mut rng2, &bob2).unwrap();
         let alice_x3dh2 = initiate(&mut rng2, &alice2, &bob_prekeys2.public_bundle()).unwrap();
         respond(&mut bob_prekeys2, &bob2, &alice_x3dh2.initial_message).unwrap();
         let bob_dh2 = SecretKey::generate(&mut rng2);
