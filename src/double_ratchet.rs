@@ -424,9 +424,40 @@ impl Drop for DoubleRatchet {
 
 #[cfg(test)]
 mod tests {
+    use rand::RngCore;
+
     use super::*;
     use crate::keys::IdentityKeyPair;
     use crate::x3dh::{PreKeyState, initiate, respond};
+
+    #[test]
+    fn test_xeddsa_roundtrip() {
+        use crate::xeddsa::{XEdDSAPrivateKey, XEdDSAPublicKey};
+
+        let secret = SecretKey::generate(&mut OsRng);
+        let public = secret.public_key();
+
+        // Derive XEdDSA keys
+        let xeddsa_priv = XEdDSAPrivateKey::from_x25519_private(secret.as_bytes()).unwrap();
+        let xeddsa_pub_from_priv = xeddsa_priv.public_key();
+        let xeddsa_pub_from_x25519 = XEdDSAPublicKey::from_x25519_public(&public).unwrap();
+
+        assert_eq!(
+            xeddsa_pub_from_priv.as_bytes(),
+            xeddsa_pub_from_x25519.as_bytes(),
+            "XEdDSA public keys must match!"
+        );
+
+        // Try signing and verifying
+        let message = b"test";
+        let mut random = [0u8; 64];
+        OsRng.fill_bytes(&mut random);
+
+        let signature = xeddsa_priv.sign(message, &random);
+
+        xeddsa_pub_from_priv.verify(message, &signature).unwrap();
+        xeddsa_pub_from_x25519.verify(message, &signature).unwrap();
+    }
 
     #[test]
     fn test_basic_exchange() {
@@ -438,15 +469,14 @@ mod tests {
 
         let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
 
-        let bob_dh = SecretKey::generate(&mut OsRng);
-        let bob_public = bob_dh.public_key();
+        // Use Bob's signed prekey for consistency
+        let bob_dh = bob_prekeys.signed_prekey().clone();
 
         let mut alice_ratchet =
-            DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_public).unwrap();
+            DoubleRatchet::init_sender(&mut OsRng, &alice_x3dh, bob_dh.public_key()).unwrap();
 
         let bob_x3dh =
-            crate::x3dh::respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message)
-                .unwrap();
+            respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
         let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
         let msg1 = alice_ratchet.encrypt(b"Hello Bob!", b"").unwrap();

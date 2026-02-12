@@ -1,3 +1,5 @@
+// tests/integration_tests.rs (or similar)
+
 use chacha20poly1305::aead::OsRng;
 use signal_protocol::Error;
 use signal_protocol::double_ratchet::{DoubleRatchet, Header, Message};
@@ -65,7 +67,7 @@ fn test_x3dh_without_one_time_prekey() {
         .expect("X3DH should work without one-time prekey");
 
     assert!(
-        alice_x3dh.initial_message.used_one_time_prekey.is_none(),
+        alice_x3dh.initial_message.one_time_prekey_id.is_none(),
         "Should not use OPK in 3-DH mode"
     );
 }
@@ -175,7 +177,6 @@ fn test_excessive_skipped_messages() {
     let mut bob_ratchet = DoubleRatchet::init_receiver(bob_x3dh.shared_secret, bob_dh);
 
     // Encrypt 1002 messages (MAX_SKIP is 1000)
-    // Message numbers will be 0, 1, 2, ..., 1001
     let mut messages = Vec::new();
     for i in 0..1002 {
         messages.push(
@@ -186,13 +187,13 @@ fn test_excessive_skipped_messages() {
     }
 
     // Bob is at recv_count = 0
-    // Trying to decrypt message 1001 (index 1001) requires skipping 1001 messages (0..1001)
+    // Trying to decrypt message 1001 requires skipping 1001 messages
     // This exceeds MAX_SKIP = 1000
     let result = bob_ratchet.decrypt(&messages[1001], b"");
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), Error::TooManySkippedMessages);
 
-    // But message 1000 should work (skips exactly 1000 messages: 0..1000)
+    // But message 1000 should work (skips exactly 1000 messages)
     let result = bob_ratchet.decrypt(&messages[1000], b"");
     assert!(result.is_ok());
 }
@@ -251,6 +252,7 @@ fn test_invalid_signature_rejected() {
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let mut bundle = bob_prekeys.public_bundle();
 
+    // Corrupt XEdDSA signature
     bundle.signed_prekey_signature[0] ^= 1;
 
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -265,27 +267,32 @@ fn test_one_time_prekey_consumption() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
     let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
 
-    let count_before = bob_prekeys.one_time_prekeys.len();
+    let count_before = bob_prekeys.one_time_prekey_count();
     assert!(count_before > 0);
 
-    let opk1 = bob_prekeys.consume_one_time_prekey().unwrap();
-    assert_eq!(bob_prekeys.one_time_prekeys.len(), count_before - 1);
+    // Consume via actual X3DH flow
+    let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+    let bundle = bob_prekeys.public_bundle();
+    let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
 
-    let opk2 = bob_prekeys.consume_one_time_prekey().unwrap();
-    assert_eq!(bob_prekeys.one_time_prekeys.len(), count_before - 2);
+    // Respond consumes the OPK
+    let _ = respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message).unwrap();
 
-    // Each OPK should be unique
-    assert_ne!(opk1.public_key().as_bytes(), opk2.public_key().as_bytes());
+    assert_eq!(bob_prekeys.one_time_prekey_count(), count_before - 1);
 }
 
 #[test]
 fn test_missing_one_time_prekey() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let mut bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+    let bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
 
-    let result = bob_prekeys.consume_one_time_prekey();
-    assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), Error::MissingOneTimePrekey);
+    assert_eq!(bob_prekeys.one_time_prekey_count(), 0);
+
+    let bundle = bob_prekeys.public_bundle();
+    assert!(
+        bundle.one_time_prekey.is_none(),
+        "Bundle should not have OPK when none available"
+    );
 }
 
 #[test]

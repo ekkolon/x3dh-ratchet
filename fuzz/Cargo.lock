@@ -144,6 +144,7 @@ dependencies = [
  "digest",
  "fiat-crypto",
  "rustc_version",
+ "serde",
  "subtle",
  "zeroize",
 ]
@@ -448,6 +449,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "chacha20poly1305",
+ "curve25519-dalek",
  "ed25519-dalek",
  "hkdf",
  "hmac",
@@ -455,6 +457,7 @@ dependencies = [
  "serde",
  "serde_arrays",
  "sha2",
+ "subtle",
  "thiserror",
  "x25519-dalek",
  "zeroize",
