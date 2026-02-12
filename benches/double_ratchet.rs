@@ -12,12 +12,9 @@ fn setup_ratchet() -> (DoubleRatchet, DoubleRatchet) {
     let bundle = bob_prekeys.public_bundle();
 
     let alice_x3dh = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
-    let bob_x3dh = x3dh_ratchet::x3dh::respond(
-        &mut bob_prekeys,
-        &bob_identity,
-        &alice_x3dh.initial_message,
-    )
-    .unwrap();
+    let bob_x3dh =
+        x3dh_ratchet::x3dh::respond(&mut bob_prekeys, &bob_identity, &alice_x3dh.initial_message)
+            .unwrap();
 
     let bob_dh = SecretKey::generate(&mut OsRng);
     let alice_ratchet =
