@@ -35,11 +35,6 @@
 //! - ChaCha20-Poly1305 is a secure AEAD cipher
 //! - Random number generator is cryptographically secure
 //!
-//! **Out of scope:**
-//! - Side-channel attacks (timing, power, cache)
-//! - Physical attacks on hardware
-//! - Social engineering or endpoint compromise via malware
-//!
 //! # Protocol Flow
 //!
 //! ## 1. Setup (Responder/Bob)
@@ -170,9 +165,10 @@ pub mod error;
 pub mod keys;
 pub mod storage;
 pub mod x3dh;
+pub mod xeddsa;
 
 // Re-export main types
 pub use double_ratchet::{DoubleRatchet, Header, Message};
 pub use error::{Error, Result};
-pub use keys::{IdentityKeyPair, PublicKey, SecretKey, SigningKeyPair};
+pub use keys::{IdentityKeyPair, PublicKey, SecretKey};
 pub use x3dh::{InitialMessage, InitiatorResult, PreKeyBundle, PreKeyState, ResponderResult};

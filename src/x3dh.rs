@@ -5,13 +5,6 @@
 //!
 //! ## Security Against Identity Substitution
 //!
-//! **Important:** The official Signal specification uses `XEdDSA` signatures where
-//! the Ed25519 signing key is cryptographically derived from the X25519 DH key,
-//! providing inherent binding between identity components.
-//!
-//! This implementation uses **independent** X25519 and Ed25519 keys for simplicity.
-//! To prevent identity substitution attacks, the signature covers:
-//!
 //! ```text
 //! signature = Sign(IK_signing, IK_dh || IK_verifying || SPK)
 //! ```
@@ -50,285 +43,268 @@
 
 use crate::crypto::{SymmetricKey, derive_x3dh_secret};
 use crate::error::{Error, Result};
-use crate::keys::{IdentityKeyPair, PublicKey, SecretKey, verify_signature};
-use chacha20poly1305::aead::rand_core::CryptoRngCore;
-use ed25519_dalek::Signature;
-use zeroize::Zeroize;
+use crate::keys::{IdentityKeyPair, PublicKey, SecretKey};
+use crate::xeddsa::{SIGNATURE_LENGTH, XEdDSAPrivateKey, XEdDSAPublicKey};
+use rand_core::CryptoRngCore;
+use std::collections::HashMap;
 
-/// Prekey bundle published by responder (Bob).
+/// Prekey bundle published by a user for others to initiate sessions.
 ///
-/// Contains all public keys needed for initiator (Alice) to perform X3DH.
-/// The bundle is authenticated via an Ed25519 signature over all identity
-/// components and the signed prekey.
+/// Contains an identity key, a signed prekey with signature, and optionally
+/// a one-time prekey. The signature proves possession of the identity key
+/// and binds it to the signed prekey.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PreKeyBundle {
-    /// Responder's long-term DH public key (X25519)
+    /// Long-term identity key (X25519 public key)
     pub identity_key: PublicKey,
 
-    /// Responder's long-term verifying key (Ed25519)
-    ///
-    /// This is separate from `identity_key` because we use independent
-    /// X25519/Ed25519 keys rather than `XEdDSA`.
-    #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
-    pub identity_verifying_key: [u8; 32],
-
-    /// Responder's signed prekey (rotated periodically)
+    /// Medium-term signed prekey (X25519 public key)
     pub signed_prekey: PublicKey,
 
-    /// Signature over (`identity_key` || `identity_verifying_key` || `signed_prekey`)
-    ///
-    /// Binds both identity key components to prevent substitution attacks.
+    /// XEdDSA signature over (identity_key || signed_prekey)
+    /// Signature is 64 bytes: R (32) || s (32)
     #[cfg_attr(feature = "serde", serde(with = "serde_arrays"))]
-    pub signed_prekey_signature: [u8; 64],
+    pub signed_prekey_signature: [u8; SIGNATURE_LENGTH],
 
-    /// Optional one-time prekey (consumed after use)
-    pub one_time_prekey: Option<PublicKey>,
+    /// Optional one-time prekey ID and corresponding X25519 public key
+    /// If present, enables 4-DH mode for stronger forward secrecy.
+    pub one_time_prekey: Option<(u32, PublicKey)>,
 }
 
 impl PreKeyBundle {
-    /// Verifies the signed prekey signature.
+    /// Verifies the XEdDSA signature on the signed prekey.
     ///
-    /// Ensures the bundle was created by the holder of both identity key components
-    /// and prevents MITM identity substitution attacks.
+    /// Ensures the bundle was created by the owner of the identity key
+    /// and hasn't been tampered with.
     ///
-    /// # Security
-    ///
-    /// The signature covers all three public key components:
-    /// - `identity_key` (X25519 DH key)
-    /// - `identity_verifying_key` (Ed25519 signing key)
-    /// - `signed_prekey`
-    ///
-    /// This prevents an attacker from substituting either identity component
-    /// without invalidating the signature.
+    /// # Returns
+    /// - `Ok(())` if signature is valid
+    /// - `Err(Error::InvalidSignature)` if verification fails
     pub fn verify_signature(&self) -> Result<()> {
-        // Build message: identity_dh || identity_verifying || signed_prekey
-        let mut message = Vec::with_capacity(96); // 32 + 32 + 32
+        // Convert X25519 identity key to XEdDSA public key
+        let xeddsa_public = XEdDSAPublicKey::from_x25519_public(&self.identity_key)?;
+
+        // Message format: identity_key || signed_prekey
+        let mut message = Vec::with_capacity(64);
         message.extend_from_slice(self.identity_key.as_bytes());
-        message.extend_from_slice(&self.identity_verifying_key);
         message.extend_from_slice(self.signed_prekey.as_bytes());
 
-        verify_signature(
-            &self.identity_verifying_key,
-            &message,
-            &self.signed_prekey_signature,
-        )
+        // Verify XEdDSA signature
+        xeddsa_public.verify(&message, &self.signed_prekey_signature)
     }
 }
 
-/// State maintained by responder for X3DH.
+/// Prekey state maintained by a user (Bob) to respond to X3DH initiations.
 ///
-/// Contains secret keys needed to respond to handshake initiations.
+/// Contains:
+/// - Identity keypair (long-term)
+/// - Signed prekey (medium-term, rotated periodically)
+/// - One-time prekeys (single-use, consumed per session)
+// #[cfg_attr(feature = "serde", derive(Encode, Decode))]
 pub struct PreKeyState {
-    /// Identity public key (X25519 DH)
-    pub identity_public: PublicKey,
-
-    /// Identity verifying key (Ed25519)
-    pub verifying_key_bytes: [u8; 32],
-
-    /// Signed prekey pair
-    pub signed_prekey: SecretKey,
-
-    /// Signature over (`identity_public` || `verifying_key_bytes` || `signed_prekey.public`)
-    signed_prekey_signature: Signature,
-
-    /// One-time prekey pairs (consumed when used)
-    pub one_time_prekeys: Vec<SecretKey>,
+    identity: IdentityKeyPair,
+    signed_prekey: SecretKey,
+    signed_prekey_signature: [u8; SIGNATURE_LENGTH],
+    one_time_prekeys: HashMap<u32, SecretKey>,
+    next_opk_id: u32,
 }
 
 impl PreKeyState {
-    /// Generates new prekey state with default number of one-time prekeys (100).
-    pub fn generate<R: CryptoRngCore>(rng: &mut R, identity: &IdentityKeyPair) -> Self {
-        Self::generate_with_count(rng, identity, 100)
-    }
-
-    /// Generates prekey state with specific one-time prekey count.
+    /// Generates a new prekey state with specified number of one-time prekeys.
     ///
     /// # Arguments
     /// * `rng` - Cryptographically secure RNG
     /// * `identity` - Long-term identity keypair
-    /// * `opk_count` - Number of one-time prekeys to generate
+    /// * `num_one_time_keys` - Number of one-time prekeys to generate (default: 100)
+    pub fn generate<R: CryptoRngCore>(rng: &mut R, identity: &IdentityKeyPair) -> Self {
+        Self::generate_with_count(rng, identity, 100)
+    }
+
+    /// Generates prekey state with custom one-time prekey count.
     pub fn generate_with_count<R: CryptoRngCore>(
         rng: &mut R,
         identity: &IdentityKeyPair,
-        opk_count: usize,
+        num_one_time_keys: u32,
     ) -> Self {
         let signed_prekey = SecretKey::generate(rng);
 
-        // Create signature binding all three public key components
-        let mut message = Vec::with_capacity(96);
+        // Create XEdDSA signature over (identity_key || signed_prekey)
+        let mut message = Vec::with_capacity(64);
         message.extend_from_slice(identity.public_key().as_bytes());
-        message.extend_from_slice(&identity.verifying_key().to_bytes());
         message.extend_from_slice(signed_prekey.public_key().as_bytes());
 
-        let signed_prekey_signature = identity.signing_key.sign(&message);
+        // Generate 64 bytes of randomness for XEdDSA signing
+        let mut random = [0u8; 64];
+        rng.fill_bytes(&mut random);
 
-        let one_time_prekeys: Vec<SecretKey> =
-            (0..opk_count).map(|_| SecretKey::generate(rng)).collect();
+        // Convert identity key to XEdDSA and sign
+        let xeddsa_private =
+            XEdDSAPrivateKey::from_x25519_private(identity.secret_key().as_bytes())
+                .expect("Failed to convert identity key to XEdDSA");
+
+        let signed_prekey_signature = xeddsa_private.sign(&message, &random);
+
+        // Generate one-time prekeys
+        let mut one_time_prekeys = HashMap::new();
+        for i in 0..num_one_time_keys {
+            one_time_prekeys.insert(i, SecretKey::generate(rng));
+        }
 
         Self {
-            identity_public: identity.public_key(),
-            verifying_key_bytes: identity.signing_key.verifying_key_bytes(),
+            identity: identity.clone(),
             signed_prekey,
             signed_prekey_signature,
             one_time_prekeys,
+            next_opk_id: num_one_time_keys,
         }
     }
 
-    /// Creates public bundle for distribution to initiators.
+    /// Returns the public prekey bundle for distribution.
     ///
-    /// The bundle includes one one-time prekey if available (first in the list).
-    #[must_use]
+    /// Includes an available one-time prekey if any remain.
     pub fn public_bundle(&self) -> PreKeyBundle {
+        let one_time_prekey = self
+            .one_time_prekeys
+            .iter()
+            .next()
+            .map(|(id, sk)| (*id, sk.public_key())); // ← Include ID!
+
         PreKeyBundle {
-            identity_key: self.identity_public,
-            identity_verifying_key: self.verifying_key_bytes,
+            identity_key: *self.identity.public_key(),
             signed_prekey: self.signed_prekey.public_key(),
-            signed_prekey_signature: self.signed_prekey_signature.to_bytes(),
-            one_time_prekey: self
-                .one_time_prekeys
-                .first()
-                .map(super::keys::SecretKey::public_key),
+            signed_prekey_signature: self.signed_prekey_signature,
+            one_time_prekey,
         }
     }
 
-    /// Consumes a one-time prekey from the end of the list.
+    /// Consumes a one-time prekey by ID.
     ///
-    /// # Errors
-    /// Returns `Error::MissingOneTimePrekey` if no OPKs remain.
-    pub fn consume_one_time_prekey(&mut self) -> Result<SecretKey> {
-        self.one_time_prekeys
-            .pop()
-            .ok_or(Error::MissingOneTimePrekey)
+    /// Returns the secret key if it exists and hasn't been consumed.
+    pub fn consume_one_time_prekey(&mut self, id: u32) -> Option<SecretKey> {
+        self.one_time_prekeys.remove(&id)
+    }
+
+    /// Adds new one-time prekeys to the state.
+    pub fn add_one_time_prekeys<R: CryptoRngCore>(&mut self, rng: &mut R, count: u32) {
+        for _ in 0..count {
+            let sk = SecretKey::generate(rng);
+            self.one_time_prekeys.insert(self.next_opk_id, sk);
+            self.next_opk_id += 1;
+        }
+    }
+
+    /// Returns reference to identity keypair.
+    pub fn identity(&self) -> &IdentityKeyPair {
+        &self.identity
+    }
+
+    /// Returns reference to signed prekey secret.
+    pub fn signed_prekey(&self) -> &SecretKey {
+        &self.signed_prekey
+    }
+
+    /// Returns number of available one-time prekeys.
+    pub fn one_time_prekey_count(&self) -> usize {
+        self.one_time_prekeys.len()
     }
 }
 
-impl std::fmt::Debug for PreKeyState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreKeyState")
-            .field("identity_public", &self.identity_public)
-            .field("signed_prekey_public", &self.signed_prekey.public_key())
-            .field("one_time_prekey_count", &self.one_time_prekeys.len())
-            .finish()
-    }
-}
-
-/// Initial message sent by initiator (Alice) to responder (Bob).
+/// Initial message sent by Alice to Bob to initiate X3DH.
+///
+/// Contains Alice's identity and ephemeral public keys, allowing Bob
+/// to perform the X3DH computation and derive the shared secret.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InitialMessage {
-    /// Initiator's identity key (X25519 DH public key)
+    /// Alice's identity public key
     pub identity_key: PublicKey,
 
-    /// Initiator's ephemeral key (generated fresh for this session)
+    /// Alice's ephemeral public key
     pub ephemeral_key: PublicKey,
 
-    /// Which one-time prekey was used (if any)
-    pub used_one_time_prekey: Option<PublicKey>,
+    /// ID of Bob's one-time prekey used (if any)
+    pub one_time_prekey_id: Option<u32>,
 }
 
-/// Result of initiator's X3DH computation.
+/// Result of X3DH initiation by Alice.
+#[derive(Debug)]
 pub struct InitiatorResult {
-    /// Shared secret derived from X3DH (input to Double Ratchet)
+    /// Shared secret derived from DH operations
     pub shared_secret: SymmetricKey,
 
-    /// Initial message to send to responder
+    /// Initial message to send to Bob
     pub initial_message: InitialMessage,
 
-    /// Associated data for first encrypted message
-    ///
-    /// Contains `IK_A || IK_B` for additional authentication context.
+    /// Associated data for authentication (identity keys)
     pub associated_data: Vec<u8>,
 }
 
-impl std::fmt::Debug for InitiatorResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InitiatorResult")
-            .field("initial_message", &self.initial_message)
-            .finish()
-    }
-}
-
-/// Result of responder's X3DH computation.
+/// Result of X3DH response by Bob.
+#[derive(Debug)]
 pub struct ResponderResult {
-    /// Shared secret derived from X3DH (must match initiator's)
+    /// Shared secret derived from DH operations
     pub shared_secret: SymmetricKey,
 
-    /// Associated data for first encrypted message (must match initiator's)
+    /// Associated data for authentication (identity keys)
     pub associated_data: Vec<u8>,
 }
 
-impl std::fmt::Debug for ResponderResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ResponderResult").finish()
-    }
-}
-
-/// Initiator (Alice) side of X3DH handshake.
+/// Initiates X3DH key agreement (Alice's side).
 ///
-/// Performs the following DH operations:
-/// - DH1 = `DH(IK_A, SPK_B)` - Alice's identity with Bob's signed prekey
-/// - DH2 = `DH(EK_A, IK_B)` - Alice's ephemeral with Bob's identity
-/// - DH3 = `DH(EK_A, SPK_B)` - Alice's ephemeral with Bob's signed prekey
-/// - DH4 = `DH(EK_A, OPK_B)` - Alice's ephemeral with Bob's one-time prekey [if present]
+/// Performs 3 or 4 Diffie-Hellman operations depending on whether
+/// a one-time prekey is available in Bob's bundle.
 ///
-/// Derives: SK = KDF(DH1 || DH2 || DH3 || DH4)
+/// # Arguments
+/// * `rng` - Cryptographically secure RNG
+/// * `alice_identity` - Alice's long-term identity keypair
+/// * `bob_bundle` - Bob's prekey bundle
 ///
-/// # Security
-///
-/// - DH1 and DH2 provide mutual authentication
-/// - DH3 and DH4 provide forward secrecy
-/// - Ephemeral key is zeroized after use
-///
-/// # Errors
-///
-/// Returns error if signature verification fails.
+/// # Returns
+/// Shared secret and initial message to send to Bob
 pub fn initiate<R: CryptoRngCore>(
     rng: &mut R,
-    initiator_identity: &IdentityKeyPair,
-    bundle: &PreKeyBundle,
+    alice_identity: &IdentityKeyPair,
+    bob_bundle: &PreKeyBundle,
 ) -> Result<InitiatorResult> {
-    // Verify bundle signature first (prevents MITM)
-    bundle.verify_signature()?;
+    // Verify Bob's signature on the bundle
+    bob_bundle.verify_signature()?;
 
-    // Generate ephemeral key for this session
-    let mut ephemeral = SecretKey::generate(rng);
-    let ephemeral_public = ephemeral.public_key();
+    // Alice's ephemeral keypair
+    let alice_ephemeral = SecretKey::generate(rng);
 
-    // Perform 4 DH operations (or 3 if no OPK)
-    let mut dh1 = initiator_identity
-        .dh_key
-        .diffie_hellman(&bundle.signed_prekey);
-    let mut dh2 = ephemeral.diffie_hellman(&bundle.identity_key);
-    let mut dh3 = ephemeral.diffie_hellman(&bundle.signed_prekey);
-    let mut dh4 = bundle
-        .one_time_prekey
-        .as_ref()
-        .map(|opk| ephemeral.diffie_hellman(opk));
+    // DH1 = DH(IK_A, SPK_B)
+    let dh1 = alice_identity
+        .secret_key()
+        .diffie_hellman(&bob_bundle.signed_prekey);
 
-    // Derive shared secret
-    let shared_secret = derive_x3dh_secret(&dh1, &dh2, &dh3, dh4.as_ref());
+    // DH2 = DH(EK_A, IK_B)
+    let dh2 = alice_ephemeral.diffie_hellman(&bob_bundle.identity_key);
 
-    // Zeroize sensitive material immediately
-    ephemeral.zeroize();
-    dh1.zeroize();
-    dh2.zeroize();
-    dh3.zeroize();
-    if let Some(ref mut d4) = dh4 {
-        d4.zeroize();
-    }
+    // DH3 = DH(EK_A, SPK_B)
+    let dh3 = alice_ephemeral.diffie_hellman(&bob_bundle.signed_prekey);
 
-    // Build initial message
-    let initial_message = InitialMessage {
-        identity_key: initiator_identity.public_key(),
-        ephemeral_key: ephemeral_public,
-        used_one_time_prekey: bundle.one_time_prekey,
+    // DH4 = DH(EK_A, OPK_B) if one-time prekey available
+    let (dh4, one_time_prekey_id) = if let Some((opk_id, opk_public)) = bob_bundle.one_time_prekey {
+        let dh4 = alice_ephemeral.diffie_hellman(&opk_public);
+        (Some(dh4), Some(opk_id))
+    } else {
+        (None, None)
     };
+
+    // Derive shared secret: SK = KDF(DH1 || DH2 || DH3 || [DH4])
+    let shared_secret = derive_x3dh_secret(&dh1, &dh2, &dh3, dh4.as_ref());
 
     // Associated data: IK_A || IK_B
     let mut associated_data = Vec::with_capacity(64);
-    associated_data.extend_from_slice(initiator_identity.public_key().as_bytes());
-    associated_data.extend_from_slice(bundle.identity_key.as_bytes());
+    associated_data.extend_from_slice(alice_identity.public_key().as_bytes());
+    associated_data.extend_from_slice(bob_bundle.identity_key.as_bytes());
+
+    let initial_message = InitialMessage {
+        identity_key: *alice_identity.public_key(),
+        ephemeral_key: alice_ephemeral.public_key(),
+        one_time_prekey_id,
+    };
 
     Ok(InitiatorResult {
         shared_secret,
@@ -337,62 +313,54 @@ pub fn initiate<R: CryptoRngCore>(
     })
 }
 
-/// Responder (Bob) side of X3DH handshake.
+/// Responds to X3DH initiation (Bob's side).
 ///
-/// Computes the same shared secret as initiator using received ephemeral key.
-/// Performs symmetric DH operations:
-/// - DH1 = `DH(SPK_B, IK_A)` - Symmetric to initiator's DH1
-/// - DH2 = `DH(IK_B, EK_A)` - Symmetric to initiator's DH2
-/// - DH3 = `DH(SPK_B, EK_A)` - Symmetric to initiator's DH3
-/// - DH4 = `DH(OPK_B, EK_A)` - Symmetric to initiator's DH4 [if used]
+/// Uses the initial message from Alice to compute the same shared secret.
 ///
-/// # Security
+/// # Arguments
+/// * `prekey_state` - Bob's prekey state
+/// * `bob_identity` - Bob's identity keypair
+/// * `initial_message` - Initial message from Alice
 ///
-/// - One-time prekey is consumed (removed from state) after use
-/// - One-time prekey reuse is detected and rejected
-///
-/// # Errors
-///
-/// Returns `Error::OneTimePreKeyConsumed` if the OPK was already used.
+/// # Returns
+/// Shared secret matching Alice's derivation
 pub fn respond(
     prekey_state: &mut PreKeyState,
-    responder_identity: &IdentityKeyPair,
+    bob_identity: &IdentityKeyPair,
     initial_message: &InitialMessage,
 ) -> Result<ResponderResult> {
-    // Perform DH operations symmetric to initiator
+    // DH1 = DH(SPK_B, IK_A)
     let dh1 = prekey_state
         .signed_prekey
         .diffie_hellman(&initial_message.identity_key);
-    let dh2 = responder_identity
-        .dh_key
+
+    // DH2 = DH(IK_B, EK_A)
+    let dh2 = bob_identity
+        .secret_key()
         .diffie_hellman(&initial_message.ephemeral_key);
+
+    // DH3 = DH(SPK_B, EK_A)
     let dh3 = prekey_state
         .signed_prekey
         .diffie_hellman(&initial_message.ephemeral_key);
 
-    // Handle one-time prekey if present in message
-    let dh4 = if let Some(used_opk_public) = initial_message.used_one_time_prekey {
-        // Find the OPK that was used
-        let opk_index = prekey_state
-            .one_time_prekeys
-            .iter()
-            .position(|sk| sk.public_key() == used_opk_public)
+    // DH4 = DH(OPK_B, EK_A) if one-time prekey was used
+    let dh4 = if let Some(opk_id) = initial_message.one_time_prekey_id {
+        let opk = prekey_state
+            .consume_one_time_prekey(opk_id)
             .ok_or(Error::OneTimePreKeyConsumed)?;
-
-        // Remove and use it (forward secrecy)
-        let opk = prekey_state.one_time_prekeys.remove(opk_index);
         Some(opk.diffie_hellman(&initial_message.ephemeral_key))
     } else {
         None
     };
 
-    // Derive same shared secret as initiator
+    // Derive shared secret: SK = KDF(DH1 || DH2 || DH3 || [DH4])
     let shared_secret = derive_x3dh_secret(&dh1, &dh2, &dh3, dh4.as_ref());
 
-    // Associated data: IK_A || IK_B (must match initiator's)
+    // Associated data: IK_A || IK_B
     let mut associated_data = Vec::with_capacity(64);
     associated_data.extend_from_slice(initial_message.identity_key.as_bytes());
-    associated_data.extend_from_slice(responder_identity.public_key().as_bytes());
+    associated_data.extend_from_slice(bob_identity.public_key().as_bytes());
 
     Ok(ResponderResult {
         shared_secret,
@@ -402,130 +370,130 @@ pub fn respond(
 
 #[cfg(test)]
 mod tests {
-    use chacha20poly1305::aead::OsRng;
-
     use super::*;
+    use chacha20poly1305::aead::OsRng;
 
     #[test]
     fn test_x3dh_handshake_with_opk() {
-        let responder_identity = IdentityKeyPair::generate(&mut OsRng);
-        let mut responder_state = PreKeyState::generate(&mut OsRng, &responder_identity);
-        let bundle = responder_state.public_bundle();
+        let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+        let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let initiator_identity = IdentityKeyPair::generate(&mut OsRng);
-        let init_result = initiate(&mut OsRng, &initiator_identity, &bundle).unwrap();
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bundle = bob_prekeys.public_bundle();
 
-        let resp_result = respond(
-            &mut responder_state,
-            &responder_identity,
-            &init_result.initial_message,
+        assert!(bundle.verify_signature().is_ok());
+        assert!(bundle.one_time_prekey.is_some());
+
+        let alice_result = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
+
+        let bob_result = respond(
+            &mut bob_prekeys,
+            &bob_identity,
+            &alice_result.initial_message,
         )
         .unwrap();
 
         assert_eq!(
-            init_result.shared_secret.as_bytes(),
-            resp_result.shared_secret.as_bytes()
+            alice_result.shared_secret.as_bytes(),
+            bob_result.shared_secret.as_bytes()
         );
-        assert_eq!(init_result.associated_data, resp_result.associated_data);
+        assert_eq!(alice_result.associated_data, bob_result.associated_data);
     }
 
     #[test]
     fn test_x3dh_handshake_without_opk() {
-        let responder_identity = IdentityKeyPair::generate(&mut OsRng);
-        let responder_state = PreKeyState::generate_with_count(&mut OsRng, &responder_identity, 0);
-        let mut bundle = responder_state.public_bundle();
-        bundle.one_time_prekey = None;
+        let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+        let bob_identity = IdentityKeyPair::generate(&mut OsRng);
 
-        let initiator_identity = IdentityKeyPair::generate(&mut OsRng);
-        let init_result = initiate(&mut OsRng, &initiator_identity, &bundle).unwrap();
+        let mut bob_prekeys = PreKeyState::generate_with_count(&mut OsRng, &bob_identity, 0);
+        let bundle = bob_prekeys.public_bundle();
 
-        assert!(init_result.initial_message.used_one_time_prekey.is_none());
+        assert!(bundle.verify_signature().is_ok());
+        assert!(bundle.one_time_prekey.is_none());
+
+        let alice_result = initiate(&mut OsRng, &alice_identity, &bundle).unwrap();
+
+        let bob_result = respond(
+            &mut bob_prekeys,
+            &bob_identity,
+            &alice_result.initial_message,
+        )
+        .unwrap();
+
+        assert_eq!(
+            alice_result.shared_secret.as_bytes(),
+            bob_result.shared_secret.as_bytes()
+        );
     }
 
     #[test]
     fn test_invalid_signature() {
-        let responder_identity = IdentityKeyPair::generate(&mut OsRng);
-        let responder_state = PreKeyState::generate(&mut OsRng, &responder_identity);
-        let mut bundle = responder_state.public_bundle();
+        let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let mut bundle = bob_prekeys.public_bundle();
 
-        bundle.signed_prekey_signature[0] ^= 1;
+        // Corrupt the signature
+        bundle.signed_prekey_signature[0] ^= 0xFF;
 
-        let result = bundle.verify_signature();
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::InvalidSignature);
+        assert!(bundle.verify_signature().is_err());
     }
 
-    /// Tests identity substitution attack is prevented
     #[test]
     fn test_identity_substitution_attack_prevented() {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-        let attacker_identity = IdentityKeyPair::generate(&mut OsRng);
+        let eve_identity = IdentityKeyPair::generate(&mut OsRng);
 
         let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
         let original_bundle = bob_prekeys.public_bundle();
 
-        // Verify original bundle is valid
         assert!(original_bundle.verify_signature().is_ok());
 
-        // Attack 1: Replace DH key only
-        let mut attack1 = original_bundle.clone();
-        attack1.identity_key = attacker_identity.public_key();
-        assert!(
-            attack1.verify_signature().is_err(),
-            "DH key substitution must fail"
-        );
+        // Eve tries to substitute Bob's identity key with her own
+        let mut malicious_bundle = original_bundle.clone();
+        malicious_bundle.identity_key = *eve_identity.public_key();
 
-        // Attack 2: Replace verifying key only
-        let mut attack2 = original_bundle.clone();
-        attack2.identity_verifying_key = attacker_identity.verifying_key().to_bytes();
-        assert!(
-            attack2.verify_signature().is_err(),
-            "Verifying key substitution must fail"
-        );
-
-        // Attack 3: Replace both keys
-        let mut attack3 = original_bundle.clone();
-        attack3.identity_key = attacker_identity.public_key();
-        attack3.identity_verifying_key = attacker_identity.verifying_key().to_bytes();
-        assert!(
-            attack3.verify_signature().is_err(),
-            "Full identity substitution must fail"
-        );
+        // Signature verification should fail
+        assert!(malicious_bundle.verify_signature().is_err());
     }
 
-    /// Tests MITM attack at X3DH initiation level
-    #[test]
-    fn test_mitm_attack_rejected() {
-        let alice_identity = IdentityKeyPair::generate(&mut OsRng);
-        let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-        let attacker_identity = IdentityKeyPair::generate(&mut OsRng);
-
-        let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
-        let mut bundle = bob_prekeys.public_bundle();
-
-        // Attacker replaces Bob's DH key
-        bundle.identity_key = attacker_identity.public_key();
-
-        // Alice tries to initiate - must fail
-        let result = initiate(&mut OsRng, &alice_identity, &bundle);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), Error::InvalidSignature);
-    }
-
-    /// Tests signature cannot be reused with different signed prekey
     #[test]
     fn test_signature_non_reusable() {
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
-        let bundle1 = bob_prekeys.public_bundle();
+        let bundle = bob_prekeys.public_bundle();
 
-        let new_spk = SecretKey::generate(&mut OsRng);
-        let mut bundle2 = bundle1.clone();
-        bundle2.signed_prekey = new_spk.public_key();
+        // attempt to reuse signature with different signed prekey
+        let mut bundle2 = bundle.clone();
+        bundle2.signed_prekey = SecretKey::generate(&mut OsRng).public_key();
 
-        assert!(
-            bundle2.verify_signature().is_err(),
-            "Signature must not verify with different SPK"
+        assert!(bundle2.verify_signature().is_err());
+    }
+
+    #[test]
+    fn test_mitm_attack_rejected() {
+        let alice_identity = IdentityKeyPair::generate(&mut OsRng);
+        let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+        let eve_identity = IdentityKeyPair::generate(&mut OsRng);
+
+        let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity);
+        let eve_bundle = eve_prekeys.public_bundle();
+
+        // Alice initiates with what she thinks is Bob's bundle (but is Eve's)
+        let alice_result = initiate(&mut OsRng, &alice_identity, &eve_bundle).unwrap();
+
+        // Eve cannot present this to Bob because Bob will derive different secret
+        let mut bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+        let bob_result = respond(
+            &mut bob_prekeys,
+            &bob_identity,
+            &alice_result.initial_message,
+        );
+
+        // Bob's computation will succeed but produce different secret
+        assert!(bob_result.is_ok());
+        assert_ne!(
+            alice_result.shared_secret.as_bytes(),
+            bob_result.unwrap().shared_secret.as_bytes()
         );
     }
 }

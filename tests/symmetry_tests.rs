@@ -6,8 +6,6 @@ use signal_protocol::{
 
 #[test]
 fn test_x3dh_formal_symmetry_multiple_runs() {
-    use rand_core::OsRng;
-
     for _ in 0..100 {
         let alice_identity = IdentityKeyPair::generate(&mut OsRng);
         let bob_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -31,31 +29,13 @@ fn test_x3dh_formal_symmetry_multiple_runs() {
 fn test_identity_substitution_breaks_agreement() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let attacker_identity = IdentityKeyPair::generate(&mut OsRng);
+    let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let bundle = bob_prekeys.public_bundle();
 
-    eprintln!(
-        "Original identity_key: {:?}",
-        &bundle.identity_key.as_bytes()[..4]
-    );
-    eprintln!(
-        "Original verifying_key: {:?}",
-        &bundle.identity_key.as_bytes()[..4]
-    );
-
     let mut modified_bundle = bundle.clone();
-    modified_bundle.identity_key = attacker_identity.public_key();
-
-    eprintln!(
-        "Modified identity_key: {:?}",
-        &modified_bundle.identity_key.as_bytes()[..4]
-    );
-    eprintln!(
-        "Modified verifying_key: {:?}",
-        &modified_bundle.identity_key.as_bytes()[..4]
-    );
+    modified_bundle.identity_key = *attempter_identity.public_key();
 
     let result = initiate(&mut OsRng, &alice_identity, &modified_bundle);
 
@@ -109,7 +89,6 @@ fn test_root_chain_key_separation() {
 
 #[test]
 fn test_ratchet_state_persistence() {
-    use rand_core::OsRng;
     use serde_json;
 
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -148,7 +127,6 @@ fn test_ratchet_state_persistence() {
 
 #[test]
 fn test_ratchet_serialization_determinism() {
-    use rand_core::OsRng;
     use serde_json;
 
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
@@ -170,45 +148,45 @@ fn test_ratchet_serialization_determinism() {
 #[test]
 fn test_identity_substitution_attempts() {
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let attacker_identity = IdentityKeyPair::generate(&mut OsRng);
+    let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let original_bundle = bob_prekeys.public_bundle();
 
     assert!(original_bundle.verify_signature().is_ok());
 
-    // Attempt to replace DH key only
-    let mut attack1 = original_bundle.clone();
-    attack1.identity_key = attacker_identity.public_key();
+    // Attempt to replace identity key
+    let mut attempt1 = original_bundle.clone();
+    attempt1.identity_key = *attempter_identity.public_key();
     assert!(
-        attack1.verify_signature().is_err(),
-        "DH key substitution should fail"
-    );
-
-    // Attempt to replace verifying key only
-    let mut attack2 = original_bundle.clone();
-    attack2.identity_verifying_key = attacker_identity.verifying_key().to_bytes();
-    assert!(
-        attack2.verify_signature().is_err(),
-        "Verifying key substitution should fail"
-    );
-
-    // Attempt to replace both keys
-    let mut attack3 = original_bundle.clone();
-    attack3.identity_key = attacker_identity.public_key();
-    attack3.identity_verifying_key = attacker_identity.verifying_key().to_bytes();
-    assert!(
-        attack3.verify_signature().is_err(),
-        "Full identity substitution should fail"
+        attempt1.verify_signature().is_err(),
+        "Identity key substitution should fail - signature won't verify with different key"
     );
 
     // Attempt to replace signed prekey
-    let attacker_spk = SecretKey::generate(&mut OsRng);
-    let mut attack4 = original_bundle.clone();
-    attack4.signed_prekey = attacker_spk.public_key();
+    let attempter_spk = SecretKey::generate(&mut OsRng);
+    let mut attempt2 = original_bundle.clone();
+    attempt2.signed_prekey = attempter_spk.public_key();
     assert!(
-        attack4.verify_signature().is_err(),
-        "Signed prekey substitution should fail"
+        attempt2.verify_signature().is_err(),
+        "Signed prekey substitution should fail - breaks signature"
+    );
+
+    // Attempt 3: Replace both identity and signed prekey
+    let mut attempt3 = original_bundle.clone();
+    attempt3.identity_key = *attempter_identity.public_key();
+    attempt3.signed_prekey = attempter_spk.public_key();
+    assert!(
+        attempt3.verify_signature().is_err(),
+        "Full substitution should fail - attempter's signature not present"
+    );
+
+    // Attempt 4: Tamper with signature bytes
+    let mut attempt4 = original_bundle.clone();
+    attempt4.signed_prekey_signature[0] ^= 0xFF;
+    assert!(
+        attempt4.verify_signature().is_err(),
+        "Corrupted signature should fail"
     );
 }
 
@@ -218,14 +196,14 @@ fn test_signature_cannot_be_reused() {
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let bundle1 = bob_prekeys.public_bundle();
 
-    // second bundle with different signed prekey
+    // Second bundle with different signed prekey but same signature
     let new_spk = SecretKey::generate(&mut OsRng);
     let mut bundle2 = bundle1.clone();
     bundle2.signed_prekey = new_spk.public_key();
 
     assert!(
         bundle2.verify_signature().is_err(),
-        "Signature should not verify with different SPK"
+        "Signature should not verify with different SPK - signature is bound to both keys"
     );
 }
 
@@ -233,16 +211,67 @@ fn test_signature_cannot_be_reused() {
 fn test_mitm_full_attempt_scenario() {
     let alice_identity = IdentityKeyPair::generate(&mut OsRng);
     let bob_identity = IdentityKeyPair::generate(&mut OsRng);
-    let attacker_identity = IdentityKeyPair::generate(&mut OsRng);
+    let attempter_identity = IdentityKeyPair::generate(&mut OsRng);
 
     let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
     let mut bundle = bob_prekeys.public_bundle();
 
-    // MITM replaces Bob's DH key with attacker's
-    bundle.identity_key = attacker_identity.public_key();
+    // MITM replaces Bob's identity key with attempter's
+    bundle.identity_key = *attempter_identity.public_key();
 
-    // Alice tries to initiate
+    // Alice tries to initiate - should fail because XEdDSA signature verification
+    // will fail when we try to verify using the attempter's key
     let result = initiate(&mut OsRng, &alice_identity, &bundle);
     assert!(result.is_err(), "X3DH with substituted identity must fail");
     assert_eq!(result.unwrap_err(), Error::InvalidSignature);
+}
+
+#[test]
+fn test_xeddsa_signature_uniqueness() {
+    // Verify that two signatures of the same message are different (randomized signing)
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let bundle1 = PreKeyState::generate(&mut OsRng, &bob_identity).public_bundle();
+    let bundle2 = PreKeyState::generate(&mut OsRng, &bob_identity).public_bundle();
+
+    // Same identity, different signed prekeys
+    assert_eq!(
+        bundle1.identity_key.as_bytes(),
+        bundle2.identity_key.as_bytes()
+    );
+    assert_ne!(
+        bundle1.signed_prekey.as_bytes(),
+        bundle2.signed_prekey.as_bytes()
+    );
+
+    // Signatures should be different (randomized)
+    assert_ne!(
+        bundle1.signed_prekey_signature, bundle2.signed_prekey_signature,
+        "XEdDSA signatures should be randomized"
+    );
+
+    // But both should verify
+    assert!(bundle1.verify_signature().is_ok());
+    assert!(bundle2.verify_signature().is_ok());
+}
+
+#[test]
+fn test_xeddsa_cross_bundle_signature_reuse_fails() {
+    // Ensure you can't take a signature from one bundle and use it on another
+    let bob_identity = IdentityKeyPair::generate(&mut OsRng);
+    let eve_identity = IdentityKeyPair::generate(&mut OsRng);
+
+    let bob_prekeys = PreKeyState::generate(&mut OsRng, &bob_identity);
+    let eve_prekeys = PreKeyState::generate(&mut OsRng, &eve_identity);
+
+    let bob_bundle = bob_prekeys.public_bundle();
+    let mut eve_bundle = eve_prekeys.public_bundle();
+
+    // Eve tries to steal Bob's signature
+    eve_bundle.signed_prekey_signature = bob_bundle.signed_prekey_signature;
+
+    assert!(
+        eve_bundle.verify_signature().is_err(),
+        "Signature from different identity should not verify"
+    );
 }
