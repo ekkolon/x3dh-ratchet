@@ -18,28 +18,31 @@ This repository implements a strictly limited subset of the protocol suite:
 
   Note that [**VXEdDSA**](https://signal.org/docs/specifications/xeddsa/#vxeddsa), an extension of **XEdDSA** to make it _verifiable random function_ (VRF), is currently not implemented. It may be added in the future.
 
-## Status
+## Disclaimer
 
-This library is still experimental. Although it has been extensively tested, it has not been externally audited. Use at your own risk.
+This library is experimental and has not been externally audited.
+
+Use at your own risk. The authors provide **no warranties** regarding security, functionality, or suitability for any purpose and **assumes no liability** for any damages, data loss, or breaches resulting from its use.
 
 ## License
 
-See [LICENSE](./LICENSE) file.
+Distributed under the terms of the [BSD 3-Clause "New" or "Revised" License](./LICENSE). See LICENSE for further details.
+
+## Legal & Cryptography Notice
+
+This software implements cryptographic algorithms for secure messaging. The import, possession, use, and/or export of cryptographic software may be restricted in certain countries, including the United States, European Union member states, and other jurisdictions. Before using or distributing this software, you should check the applicable laws, regulations, and policies in your country.  
+For general international guidance on cryptography controls, see the [Wassenaar Arrangement](http://www.wassenaar.org/).
+
+**U.S. Users**. This software is classified under Export Control Commodity Classification Number (ECCN) 5D002.C.1, which includes information security software using asymmetric cryptography. Distribution in the United States and abroad may qualify for License Exception TSU (Technology Software Unrestricted) under the U.S. Export Administration Regulations (EAR), Section 740.13, for both source code and compiled code.
+
+**EU Users**. Cryptography is subject to EU export control regulations and national laws in member states. Certain strong encryption software may require registration, licensing, or other compliance steps before distribution. Users are responsible for verifying local restrictions.
 
 ## Specification References
 
-**Signal Protocol Overview**
+**Signal Protocol**          : <https://signal.org/docs/>
 
-<https://signal.org/docs/>
+**X3DH**                     : <https://signal.org/docs/specifications/x3dh/>
 
-**X3DH**
+**Double Ratchet**           : <https://signal.org/docs/specifications/doubleratchet/>
 
-<https://signal.org/docs/specifications/x3dh/>
-
-**Double Ratchet**
-
-<https://signal.org/docs/specifications/doubleratchet/>
-
-**XEdDSA**
-
-<https://signal.org/docs/specifications/xeddsa/>
+**XEdDSA**                   : <https://signal.org/docs/specifications/xeddsa/>
