@@ -1,8 +1,8 @@
 # x3dh-ratchet
 
-Cryptographic primitives based on the [Signal Protocol](https://signal.org/docs/) for secure asynchronous messaging with forward secrecy and cryptographic deniability.
+Crypto primitives based on the [Signal Protocol](https://signal.org/docs/) for secure asynchronous messaging with forward secrecy and cryptographic deniability.
 
-This repository implements a strictly limited subset of the protocol suite:
+This repository provides a strictly limited subset of the protocol suite:
 
 - [**X3DH**](https://signal.org/docs/specifications/x3dh/) (Extended Triple Diffie-Hellman)
 
@@ -22,7 +22,7 @@ This repository implements a strictly limited subset of the protocol suite:
 
 This library is experimental and has not been externally audited.
 
-Use at your own risk. The authors provide **no warranties** regarding security, functionality, or suitability for any purpose and **assumes no liability** for any damages, data loss, or breaches resulting from its use.
+Use at your own risk. The authors provide **no warranties** regarding security, functionality, or suitability for any purpose and **assume no liability** for any damages, data loss, or breaches resulting from its use.
 
 ## License
 
