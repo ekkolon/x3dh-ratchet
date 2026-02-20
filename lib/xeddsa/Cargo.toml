@@ -1,0 +1,52 @@
+[package]
+name = "xeddsa"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+
+
+[dependencies]
+locus-crypto = { workspace = true }
+
+# Cryptographic primitives
+x25519-dalek = { workspace = true, features = ["static_secrets"] }
+ed25519-dalek = { workspace = true, features = ["zeroize", "rand_core"] }
+curve25519-dalek = { workspace = true, features = ["zeroize"] }
+
+chacha20poly1305 = { workspace = true }
+
+# Key derivation and hashing
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+
+# Randomness
+rand_core = { workspace = true, features = ["getrandom"] }
+
+# Memory safety
+zeroize = { workspace = true, features = ["derive", "alloc"] }
+subtle = { workspace = true }
+
+# Serialization (optional)
+serde = { workspace = true, features = ["derive"], optional = true }
+bincode = { workspace = true, optional = true, features = ["serde"] }
+
+# Error handling
+thiserror.workspace = true
+serde_arrays.workspace = true
+
+[dev-dependencies]
+# Testing
+proptest = { workspace = true }
+quickcheck = { workspace = true }
+hex = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+serde_json = { workspace = true }
+rand = { workspace = true, features = ["getrandom"] }
+bincode = { workspace = true, features = ["serde"] }
+
+[features]
+default = ["serde"]
+std = []
+serde = ["dep:serde", "bincode/serde", "x25519-dalek/serde"]
